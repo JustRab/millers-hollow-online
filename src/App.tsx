@@ -48,6 +48,7 @@ function playUiSound(kind: 'info' | 'danger' | 'success') {
 
 function App() {
   const [state, setState] = useState<GameState | null>(null)
+  const [nameDraft, setNameDraft] = useState(() => localStorage.getItem('millers-name') ?? '')
   const [selected, setSelected] = useState('')
   const [draft, setDraft] = useState('')
   const [copied, setCopied] = useState(false)
@@ -58,9 +59,6 @@ function App() {
   const wasAlive = useRef<boolean | null>(null)
 
   useEffect(() => {
-    const savedName = localStorage.getItem('millers-name') || `Player ${Math.floor(Math.random() * 90 + 10)}`
-    localStorage.setItem('millers-name', savedName)
-    socket.emit('room:join', savedName)
     socket.on('game:state', (nextState: GameState) => {
       if (wasAlive.current === true && nextState.me && !nextState.me.alive) {
         setDeathCause(nextState.lastEvent?.title.includes('voted out') ? 'voted' : 'night')
@@ -88,8 +86,15 @@ function App() {
     return () => window.clearInterval(interval)
   }, [])
 
+  const joinGame = () => {
+    const cleanName = nameDraft.trim().slice(0, 18)
+    if (!cleanName) return
+    localStorage.setItem('millers-name', cleanName)
+    socket.emit('room:join', cleanName)
+  }
+
   if (!state || !state.me) {
-    return <main className="app night loading-screen"><div className="brand"><span className="brand-mark"><Moon size={17} fill="currentColor" /></span><span>Millers Hollow</span></div><p>Joining the village...</p></main>
+    return <main className="app night join-screen"><div className="join-card"><div className="brand"><span className="brand-mark"><Moon size={17} fill="currentColor" /></span><span>Millers Hollow</span></div><span className="section-label">JOIN THE VILLAGE</span><h1>Choose your name</h1><p>This is how the village will know you. You can change it before joining.</p><div className="join-form"><input autoFocus maxLength={18} value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && joinGame()} placeholder="Your village name" /><button className="primary-btn" disabled={!nameDraft.trim()} onClick={joinGame}>Enter the village <ChevronRight size={16} /></button></div></div></main>
   }
 
   const { me, phase } = state
@@ -101,7 +106,7 @@ function App() {
   const canHunterAct = me.role === 'Hunter' && state.pendingHunterId === me.id
   const secondsLeft = Math.max(0, Math.ceil((state.phaseEndsAt - clock) / 1000))
   const timerText = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`
-  const copyRoom = async () => { await navigator.clipboard?.writeText(state.room); setCopied(true); window.setTimeout(() => setCopied(false), 1800) }
+  const copyRoom = async () => { await navigator.clipboard?.writeText(`${window.location.origin}?room=${state.room}`); setCopied(true); window.setTimeout(() => setCopied(false), 1800) }
   const sendMessage = () => { const text = draft.trim(); if (!text) return; socket.emit('chat:send', text); setDraft('') }
   const inspect = () => {
     if (!selectedPlayer) return

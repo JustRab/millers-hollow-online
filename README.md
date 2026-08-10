@@ -24,6 +24,8 @@ Open `http://localhost:5173`. The Vite UI and the realtime room server will both
 
 To play with people on the same Wi-Fi, find this PC's local IPv4 address with `ipconfig`, then have them open `http://YOUR-IP:5173` on their devices. For example: `http://192.168.1.42:5173`. Windows Firewall may ask to allow Node.js on private networks; allow it only if this is a trusted network.
 
+The room-code copy buttons copy a complete invite link. On the hosted Render URL, click the copy button beside the room code and send that link to your players.
+
 For separate processes, use `npm run dev:server` and `npm run dev` in two terminals.
 
 For a production-style local run, build and start the single combined server:
@@ -42,3 +44,17 @@ This repository includes a `Dockerfile` and `render.yaml` for deployment on Rend
 ## Multiplayer next step
 
 The current development room is shared between browser tabs or devices on the same Wi-Fi through Socket.IO. The server owns room membership, hidden roles, phase changes, Seer inspections, chat, voting, night actions, timers, and rematches. For internet deployment, move the server and client to a hosted service, add persistent room codes and authentication, and use a production database.
+
+## Publish updates
+
+After making changes, run this in PowerShell:
+
+```powershell
+$env:Path = "$env:LOCALAPPDATA\Programs\nodejs;$env:Path"
+npm run build
+git add .
+git commit -m "Describe the change"
+git push
+```
+
+Render automatically redeploys after the push. Wait for deployment to finish, then refresh the public URL with `Ctrl+F5`.
