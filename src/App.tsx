@@ -26,12 +26,20 @@ type GameState = {
 }
 
 const socket: Socket = io()
+let sharedAudioContext: AudioContext | null = null
+
+function primeAudio() {
+  if (!window.AudioContext) return
+  sharedAudioContext ??= new window.AudioContext()
+  void sharedAudioContext.resume()
+}
 
 function playUiSound(kind: 'info' | 'danger' | 'success', enabled: boolean) {
   if (!enabled) return
-  const AudioContextClass = window.AudioContext
-  if (!AudioContextClass) return
-  const audioContext = new AudioContextClass()
+  if (!window.AudioContext) return
+  sharedAudioContext ??= new window.AudioContext()
+  const audioContext = sharedAudioContext
+  if (audioContext.state === 'suspended') void audioContext.resume()
   const oscillator = audioContext.createOscillator()
   const gain = audioContext.createGain()
   const frequency = kind === 'danger' ? 150 : kind === 'success' ? 520 : 330
@@ -96,6 +104,7 @@ function App() {
   const joinGame = () => {
     const cleanName = nameDraft.trim().slice(0, 18)
     if (!cleanName) return
+    primeAudio()
     localStorage.setItem('millers-name', cleanName)
     socket.emit('room:join', cleanName)
   }
