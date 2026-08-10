@@ -34,25 +34,52 @@ function primeAudio() {
   void sharedAudioContext.resume()
 }
 
-function playUiSound(kind: 'info' | 'danger' | 'success', enabled: boolean) {
+type SoundCue = 'join' | 'vote' | 'action' | 'protect' | 'phase' | 'death' | 'tie' | 'success' | 'danger' | 'info'
+
+function playUiSound(kind: SoundCue, enabled: boolean) {
   if (!enabled) return
   if (!window.AudioContext) return
   sharedAudioContext ??= new window.AudioContext()
   const audioContext = sharedAudioContext
   if (audioContext.state === 'suspended') void audioContext.resume()
-  const oscillator = audioContext.createOscillator()
-  const gain = audioContext.createGain()
-  const frequency = kind === 'danger' ? 150 : kind === 'success' ? 520 : 330
-  oscillator.type = kind === 'danger' ? 'sawtooth' : 'sine'
-  oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime)
-  oscillator.frequency.exponentialRampToValueAtTime(kind === 'danger' ? 90 : frequency * 1.35, audioContext.currentTime + .18)
-  gain.gain.setValueAtTime(.0001, audioContext.currentTime)
-  gain.gain.exponentialRampToValueAtTime(.08, audioContext.currentTime + .015)
-  gain.gain.exponentialRampToValueAtTime(.0001, audioContext.currentTime + .22)
-  oscillator.connect(gain).connect(audioContext.destination)
-  oscillator.start()
-  oscillator.stop(audioContext.currentTime + .24)
-  window.setTimeout(() => audioContext.close(), 320)
+  const patterns: Record<SoundCue, { notes: number[]; type: OscillatorType; gap: number; length: number }> = {
+    join: { notes: [262, 392, 523], type: 'sine', gap: .09, length: .2 },
+    vote: { notes: [220, 277], type: 'triangle', gap: .08, length: .16 },
+    action: { notes: [330, 440], type: 'square', gap: .07, length: .13 },
+    protect: { notes: [392, 523, 659], type: 'sine', gap: .1, length: .2 },
+    phase: { notes: [196, 294, 392], type: 'triangle', gap: .12, length: .24 },
+    death: { notes: [196, 147, 110], type: 'sawtooth', gap: .13, length: .3 },
+    tie: { notes: [294, 294], type: 'square', gap: .16, length: .12 },
+    success: { notes: [392, 494, 587, 784], type: 'sine', gap: .09, length: .24 },
+    danger: { notes: [165, 123, 92], type: 'sawtooth', gap: .14, length: .3 },
+    info: { notes: [330], type: 'sine', gap: 0, length: .18 },
+  }
+  const pattern = patterns[kind]
+  const start = audioContext.currentTime + .01
+  pattern.notes.forEach((frequency, index) => {
+    const oscillator = audioContext.createOscillator()
+    const gain = audioContext.createGain()
+    const noteStart = start + index * pattern.gap
+    oscillator.type = pattern.type
+    oscillator.frequency.setValueAtTime(frequency, noteStart)
+    oscillator.frequency.exponentialRampToValueAtTime(frequency * (kind === 'death' || kind === 'danger' ? .72 : 1.04), noteStart + pattern.length)
+    gain.gain.setValueAtTime(.0001, noteStart)
+    gain.gain.exponentialRampToValueAtTime(kind === 'danger' || kind === 'death' ? .055 : .07, noteStart + .012)
+    gain.gain.exponentialRampToValueAtTime(.0001, noteStart + pattern.length)
+    oscillator.connect(gain).connect(audioContext.destination)
+    oscillator.start(noteStart)
+    oscillator.stop(noteStart + pattern.length + .02)
+  })
+}
+
+function eventSound(title: string, tone: GameEvent['tone']): SoundCue {
+  const normalized = title.toLowerCase()
+  if (normalized.includes('voted') || normalized.includes('died') || normalized.includes('fired')) return 'death'
+  if (normalized.includes('tie')) return 'tie'
+  if (normalized.includes('protect')) return 'protect'
+  if (normalized.includes('win')) return tone === 'success' ? 'success' : 'danger'
+  if (normalized.includes('night') || normalized.includes('daylight') || normalized.includes('game begins') || normalized.includes('awake')) return 'phase'
+  return tone
 }
 
 function App() {
@@ -83,14 +110,14 @@ function App() {
       if (nextState.lastEvent && nextState.lastEvent.id > seenEvent.current) {
         seenEvent.current = nextState.lastEvent.id
         setNotice(nextState.lastEvent)
-        playUiSound(nextState.lastEvent.tone, audioEnabled)
+        playUiSound(eventSound(nextState.lastEvent.title, nextState.lastEvent.tone), audioEnabled)
         window.setTimeout(() => setNotice((current) => current?.id === nextState.lastEvent?.id ? null : current), 4200)
       }
     })
     socket.on('game:action-confirmed', (event: { title: string; detail: string }) => {
       const confirmation = { ...event, id: Date.now(), tone: 'info' as const }
       setNotice(confirmation)
-      playUiSound('info', audioEnabled)
+      playUiSound(event.title.toLowerCase().includes('vote') ? 'vote' : event.title.toLowerCase().includes('protection') ? 'protect' : 'action', audioEnabled)
       window.setTimeout(() => setNotice((current) => current?.id === confirmation.id ? null : current), 3200)
     })
     return () => { socket.off('connect', handleConnect); socket.off('disconnect', handleDisconnect); socket.off('game:state'); socket.off('game:action-confirmed') }
@@ -105,6 +132,7 @@ function App() {
     const cleanName = nameDraft.trim().slice(0, 18)
     if (!cleanName) return
     primeAudio()
+    playUiSound('join', audioEnabled)
     localStorage.setItem('millers-name', cleanName)
     socket.emit('room:join', cleanName)
   }
