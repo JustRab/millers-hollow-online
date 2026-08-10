@@ -86,6 +86,7 @@ function eventSound(title: string, tone: GameEvent['tone']): SoundCue {
 function App() {
   const [state, setState] = useState<GameState | null>(null)
   const [nameDraft, setNameDraft] = useState(() => localStorage.getItem('millers-name') ?? '')
+  const [roomDraft, setRoomDraft] = useState(() => new URLSearchParams(window.location.search).get('room')?.toUpperCase() || 'MILL-7Q2')
   const [selected, setSelected] = useState('')
   const [draft, setDraft] = useState('')
   const [copied, setCopied] = useState(false)
@@ -132,16 +133,16 @@ function App() {
 
   const joinGame = () => {
     const cleanName = nameDraft.trim().slice(0, 18)
-    if (!cleanName) return
+    const cleanRoom = roomDraft.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 16)
+    if (!cleanName || !cleanRoom) return
     primeAudio()
     playUiSound('join', audioEnabled)
     localStorage.setItem('millers-name', cleanName)
-    const room = new URLSearchParams(window.location.search).get('room') || 'MILL-7Q2'
-    socket.emit('room:join', { name: cleanName, room })
+    socket.emit('room:join', { name: cleanName, room: cleanRoom })
   }
 
   if (!state || !state.me) {
-    return <main className="app night join-screen"><div className="join-card"><div className="brand"><span className="brand-mark"><Moon size={17} fill="currentColor" /></span><span>Millers Hollow</span></div><span className="section-label">JOIN THE VILLAGE</span><h1>Choose your name</h1><p>This is how the village will know you. You can change it before joining.</p><div className="join-form"><input autoFocus maxLength={18} value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && joinGame()} placeholder="Your village name" /><button className="primary-btn" disabled={!nameDraft.trim()} onClick={joinGame}>Enter the village <ChevronRight size={16} /></button></div></div></main>
+    return <main className="app night join-screen"><div className="join-card"><div className="brand"><span className="brand-mark"><Moon size={17} fill="currentColor" /></span><span>Millers Hollow</span></div><span className="section-label">JOIN THE VILLAGE</span><h1>Choose your seat</h1><p>Enter a name and room code. Share the room link with the people you want in your village.</p><label className="join-label" htmlFor="room-code">ROOM CODE</label><input id="room-code" className="join-input" maxLength={16} value={roomDraft} onChange={(event) => setRoomDraft(event.target.value.toUpperCase())} onKeyDown={(event) => event.key === 'Enter' && joinGame()} placeholder="MILL-7Q2" /><label className="join-label" htmlFor="player-name">YOUR NAME</label><div className="join-form"><input id="player-name" autoFocus maxLength={18} value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && joinGame()} placeholder="Your village name" /><button className="primary-btn" disabled={!nameDraft.trim() || !roomDraft.trim()} onClick={joinGame}>Enter the village <ChevronRight size={16} /></button></div></div></main>
   }
 
   const { me, phase } = state
