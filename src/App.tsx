@@ -27,7 +27,8 @@ type GameState = {
 
 const socket: Socket = io()
 
-function playUiSound(kind: 'info' | 'danger' | 'success') {
+function playUiSound(kind: 'info' | 'danger' | 'success', enabled: boolean) {
+  if (!enabled) return
   const AudioContextClass = window.AudioContext
   if (!AudioContextClass) return
   const audioContext = new AudioContextClass()
@@ -54,6 +55,7 @@ function App() {
   const [copied, setCopied] = useState(false)
   const [clock, setClock] = useState(Date.now())
   const [connected, setConnected] = useState(socket.connected)
+  const [audioEnabled, setAudioEnabled] = useState(() => localStorage.getItem('millers-audio') !== 'off')
   const [notice, setNotice] = useState<GameEvent | { id: number; title: string; detail: string; tone: 'info' } | null>(null)
   const [deathCause, setDeathCause] = useState<DeathCause>(null)
   const seenEvent = useRef(0)
@@ -73,18 +75,18 @@ function App() {
       if (nextState.lastEvent && nextState.lastEvent.id > seenEvent.current) {
         seenEvent.current = nextState.lastEvent.id
         setNotice(nextState.lastEvent)
-        playUiSound(nextState.lastEvent.tone)
+        playUiSound(nextState.lastEvent.tone, audioEnabled)
         window.setTimeout(() => setNotice((current) => current?.id === nextState.lastEvent?.id ? null : current), 4200)
       }
     })
     socket.on('game:action-confirmed', (event: { title: string; detail: string }) => {
       const confirmation = { ...event, id: Date.now(), tone: 'info' as const }
       setNotice(confirmation)
-      playUiSound('info')
+      playUiSound('info', audioEnabled)
       window.setTimeout(() => setNotice((current) => current?.id === confirmation.id ? null : current), 3200)
     })
     return () => { socket.off('connect', handleConnect); socket.off('disconnect', handleDisconnect); socket.off('game:state'); socket.off('game:action-confirmed') }
-  }, [])
+  }, [audioEnabled])
 
   useEffect(() => {
     const interval = window.setInterval(() => setClock(Date.now()), 250)
@@ -111,6 +113,7 @@ function App() {
   const canHunterAct = me.role === 'Hunter' && state.pendingHunterId === me.id
   const secondsLeft = Math.max(0, Math.ceil((state.phaseEndsAt - clock) / 1000))
   const timerText = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`
+  const toggleAudio = () => { const next = !audioEnabled; setAudioEnabled(next); localStorage.setItem('millers-audio', next ? 'on' : 'off') }
   const copyRoom = async () => { await navigator.clipboard?.writeText(`${window.location.origin}?room=${state.room}`); setCopied(true); window.setTimeout(() => setCopied(false), 1800) }
   const sendMessage = () => { const text = draft.trim(); if (!text) return; socket.emit('chat:send', text); setDraft('') }
   const inspect = () => {
@@ -128,7 +131,7 @@ function App() {
       <header className="topbar">
         <div className="brand"><span className="brand-mark"><Moon size={17} fill="currentColor" /></span><span>Millers Hollow</span><span className="brand-tag">ONLINE</span></div>
         <div className="room-pill"><span className="live-dot" /> ROOM <strong>{state.room}</strong><button onClick={copyRoom} aria-label="Copy room code">{copied ? <Check size={14} /> : <Copy size={14} />}</button></div>
-        <div className="top-actions"><button className="icon-btn" aria-label="Audio settings"><Volume2 size={18} /></button><button className="icon-btn" aria-label="Game settings"><Settings2 size={18} /></button><div className="profile-mini">{me.name.slice(0, 2).toUpperCase()}</div></div>
+        <div className="top-actions"><button className={`icon-btn ${audioEnabled ? '' : 'muted'}`} onClick={toggleAudio} aria-label={audioEnabled ? 'Mute event sounds' : 'Enable event sounds'} title={audioEnabled ? 'Mute event sounds' : 'Enable event sounds'}>{audioEnabled ? <Volume2 size={18} /> : <Volume2 size={18} />}</button><button className="icon-btn" aria-label="Game settings"><Settings2 size={18} /></button><div className="profile-mini">{me.name.slice(0, 2).toUpperCase()}</div></div>
       </header>
 
       <section className="game-layout">
