@@ -158,6 +158,7 @@ io.on('connection', (socket) => {
     const clean = String(text ?? '').trim().slice(0, 240)
     if (!player || !clean || !player.alive) return
     messages.push({ name: player.name, text: clean, time: now() })
+    socket.broadcast.emit('chat:received')
     emitState()
   })
 

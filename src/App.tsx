@@ -34,7 +34,7 @@ function primeAudio() {
   void sharedAudioContext.resume()
 }
 
-type SoundCue = 'join' | 'vote' | 'action' | 'protect' | 'phase' | 'death' | 'tie' | 'success' | 'danger' | 'info'
+type SoundCue = 'join' | 'chat' | 'vote' | 'action' | 'protect' | 'phase' | 'death' | 'tie' | 'success' | 'danger' | 'info'
 
 function playUiSound(kind: SoundCue, enabled: boolean) {
   if (!enabled) return
@@ -44,6 +44,7 @@ function playUiSound(kind: SoundCue, enabled: boolean) {
   if (audioContext.state === 'suspended') void audioContext.resume()
   const patterns: Record<SoundCue, { notes: number[]; type: OscillatorType; gap: number; length: number }> = {
     join: { notes: [262, 392, 523], type: 'sine', gap: .09, length: .2 },
+    chat: { notes: [660, 880], type: 'sine', gap: .06, length: .1 },
     vote: { notes: [220, 277], type: 'triangle', gap: .08, length: .16 },
     action: { notes: [330, 440], type: 'square', gap: .07, length: .13 },
     protect: { notes: [392, 523, 659], type: 'sine', gap: .1, length: .2 },
@@ -120,7 +121,8 @@ function App() {
       playUiSound(event.title.toLowerCase().includes('vote') ? 'vote' : event.title.toLowerCase().includes('protection') ? 'protect' : 'action', audioEnabled)
       window.setTimeout(() => setNotice((current) => current?.id === confirmation.id ? null : current), 3200)
     })
-    return () => { socket.off('connect', handleConnect); socket.off('disconnect', handleDisconnect); socket.off('game:state'); socket.off('game:action-confirmed') }
+    socket.on('chat:received', () => playUiSound('chat', audioEnabled))
+    return () => { socket.off('connect', handleConnect); socket.off('disconnect', handleDisconnect); socket.off('game:state'); socket.off('game:action-confirmed'); socket.off('chat:received') }
   }, [audioEnabled])
 
   useEffect(() => {
