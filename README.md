@@ -43,7 +43,7 @@ This repository includes a `Dockerfile` and `render.yaml` for deployment on Rend
 
 ## Multiplayer next step
 
-The current development room is shared between browser tabs or devices on the same Wi-Fi through Socket.IO. The server owns room membership, hidden roles, phase changes, Seer inspections, chat, voting, night actions, timers, and rematches. For internet deployment, move the server and client to a hosted service, add persistent room codes and authentication, and use a production database.
+Rooms are now isolated by the `room` URL parameter. A direct visit uses `MILL-7Q2`; an invite link such as `https://your-game.onrender.com?room=FROST-42` creates or joins that room. Chat, roles, votes, phase timers, and rematches stay inside their room. Room state is still in memory, so a server restart clears active games.
 
 ## Publish updates
 

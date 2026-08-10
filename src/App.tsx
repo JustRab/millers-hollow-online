@@ -136,7 +136,8 @@ function App() {
     primeAudio()
     playUiSound('join', audioEnabled)
     localStorage.setItem('millers-name', cleanName)
-    socket.emit('room:join', cleanName)
+    const room = new URLSearchParams(window.location.search).get('room') || 'MILL-7Q2'
+    socket.emit('room:join', { name: cleanName, room })
   }
 
   if (!state || !state.me) {

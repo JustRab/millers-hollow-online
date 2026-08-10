@@ -21,7 +21,7 @@ type Player = { id: string; name: string; role: Role; alive: boolean }
 type Message = { name: string; text: string; time: string; system?: boolean }
 type GameEvent = { id: number; title: string; detail: string; tone: 'info' | 'danger' | 'success' }
 
-const players: Player[] = [
+let players: Player[] = [
   { id: 'mara-bot', name: 'Mara V.', role: 'Werewolf', alive: true },
   { id: 'jon-bot', name: 'Jon Bell', role: 'Villager', alive: true },
   { id: 'sofia-bot', name: 'Sofia K.', role: 'Doctor', alive: true },
@@ -38,13 +38,81 @@ let phaseEndsAt = 0
 let pendingHunterId: string | null = null
 let eventId = 0
 let lastEvent: GameEvent | null = null
-const messages: Message[] = [
+let messages: Message[] = [
   { name: 'System', text: 'A hush settles over Millers Hollow.', time: '10:42 PM', system: true },
 ]
-const inspections = new Map<string, Map<string, Role>>()
-const votes = new Map<string, string>()
-const nightActions = new Map<string, string>()
-const readyPlayers = new Set<string>()
+let inspections = new Map<string, Map<string, Role>>()
+let votes = new Map<string, string>()
+let nightActions = new Map<string, string>()
+let readyPlayers = new Set<string>()
+
+type RoomSnapshot = {
+  players: Player[]
+  phase: Phase
+  night: number
+  hostId: string
+  winner: 'village' | 'werewolves' | null
+  phaseEndsAt: number
+  pendingHunterId: string | null
+  eventId: number
+  lastEvent: GameEvent | null
+  messages: Message[]
+  inspections: Map<string, Map<string, Role>>
+  votes: Map<string, string>
+  nightActions: Map<string, string>
+  readyPlayers: Set<string>
+}
+let activeRoomCode = ROOM
+const roomStates = new Map<string, RoomSnapshot>()
+
+function cloneSnapshot(snapshot: RoomSnapshot): RoomSnapshot {
+  return {
+    ...snapshot,
+    players: snapshot.players.map((player) => ({ ...player })),
+    messages: snapshot.messages.map((message) => ({ ...message })),
+    inspections: new Map([...snapshot.inspections].map(([id, roles]) => [id, new Map(roles)])),
+    votes: new Map(snapshot.votes),
+    nightActions: new Map(snapshot.nightActions),
+    readyPlayers: new Set(snapshot.readyPlayers),
+  }
+}
+
+function snapshotCurrent(): RoomSnapshot {
+  return { players, phase, night, hostId, winner, phaseEndsAt, pendingHunterId, eventId, lastEvent, messages, inspections, votes, nightActions, readyPlayers }
+}
+
+const initialRoom = snapshotCurrent()
+roomStates.set(ROOM, cloneSnapshot(initialRoom))
+
+function loadRoom(roomCode: string) {
+  const snapshot = roomStates.get(roomCode) ?? cloneSnapshot(initialRoom)
+  roomStates.set(roomCode, snapshot)
+  activeRoomCode = roomCode
+  players = snapshot.players
+  phase = snapshot.phase
+  night = snapshot.night
+  hostId = snapshot.hostId
+  winner = snapshot.winner
+  phaseEndsAt = snapshot.phaseEndsAt
+  pendingHunterId = snapshot.pendingHunterId
+  eventId = snapshot.eventId
+  lastEvent = snapshot.lastEvent
+  messages = snapshot.messages
+  inspections = snapshot.inspections
+  votes = snapshot.votes
+  nightActions = snapshot.nightActions
+  readyPlayers = snapshot.readyPlayers
+}
+
+function saveRoom(roomCode = activeRoomCode) {
+  roomStates.set(roomCode, snapshotCurrent())
+}
+
+function withRoom(socket: { data: { room?: string } }, callback: (roomCode: string) => void) {
+  const roomCode = socket.data.room ?? ROOM
+  loadRoom(roomCode)
+  try { callback(roomCode) } finally { saveRoom(roomCode) }
+}
 
 const httpServer = createServer((request, response) => {
   if (request.url === '/health') {
@@ -72,9 +140,10 @@ const announce = (title: string, detail: string, tone: GameEvent['tone']) => { l
 
 function emitState() {
   for (const socket of io.sockets.sockets.values()) {
+    if (socket.data.room !== activeRoomCode) continue
     const mine = players.find((player) => player.id === socket.id)
     socket.emit('game:state', {
-      room: ROOM,
+      room: activeRoomCode,
       phase,
       phaseEndsAt,
       pendingHunterId,
@@ -131,15 +200,26 @@ function resolveExpiredPhase() {
   emitState()
 }
 
-setInterval(resolveExpiredPhase, 500)
+setInterval(() => {
+  for (const roomCode of roomStates.keys()) {
+    loadRoom(roomCode)
+    resolveExpiredPhase()
+    saveRoom(roomCode)
+  }
+}, 500)
 
 io.on('connection', (socket) => {
-  socket.on('room:join', (requestedName: string) => {
+  socket.on('room:join', (payload: string | { name?: string; room?: string }) => {
+    const requestedName = typeof payload === 'string' ? payload : payload?.name
+    const requestedRoom = typeof payload === 'string' ? ROOM : payload?.room
+    const roomCode = String(requestedRoom || ROOM).toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 16) || ROOM
+    socket.data.room = roomCode
+    withRoom(socket, () => {
     const name = String(requestedName || 'Player').trim().slice(0, 18) || 'Player'
     const existingPlayer = players.find((player) => player.id === socket.id)
     if (existingPlayer) {
       existingPlayer.name = name
-      socket.join(ROOM)
+      socket.join(roomCode)
       emitState()
       return
     }
@@ -148,21 +228,25 @@ io.on('connection', (socket) => {
     const role: Role = (['Seer', 'Werewolf', 'Doctor'] as Role[])[connectedHumans] ?? 'Villager'
     players.push({ id: socket.id, name, role, alive: true })
     inspections.set(socket.id, new Map())
-    socket.join(ROOM)
+    socket.join(roomCode)
     messages.push({ name: 'System', text: `${name} joined the village.`, time: now(), system: true })
     emitState()
+    })
   })
 
   socket.on('chat:send', (text: string) => {
+    withRoom(socket, (roomCode) => {
     const player = players.find((candidate) => candidate.id === socket.id)
     const clean = String(text ?? '').trim().slice(0, 240)
     if (!player || !clean || !player.alive) return
     messages.push({ name: player.name, text: clean, time: now() })
-    socket.broadcast.emit('chat:received')
+    socket.to(roomCode).emit('chat:received')
     emitState()
+    })
   })
 
   socket.on('phase:toggle', () => {
+    withRoom(socket, () => {
     if (socket.id !== hostId || winner || phase === 'lobby') return
     phase = phase === 'night' ? 'day' : 'night'
     phaseEndsAt = Date.now() + (phase === 'night' ? 120_000 : 180_000)
@@ -172,9 +256,11 @@ io.on('connection', (socket) => {
     messages.push({ name: 'System', text: phase === 'night' ? 'The village falls asleep.' : 'The village wakes.', time: now(), system: true })
     announce(phase === 'night' ? 'Night has fallen' : 'The village is awake', phase === 'night' ? 'Werewolves, Doctor, and Seer: choose your action.' : 'Discuss what happened and decide who to trust.', 'info')
     emitState()
+    })
   })
 
   socket.on('game:start', () => {
+    withRoom(socket, () => {
     if (socket.id !== hostId || phase !== 'lobby') return
     phase = 'night'
     night = 1
@@ -182,9 +268,11 @@ io.on('connection', (socket) => {
     messages.push({ name: 'System', text: 'The village falls asleep. The game begins.', time: now(), system: true })
     announce('The game begins', 'The village has gone quiet. Choose your action.', 'info')
     emitState()
+    })
   })
 
   socket.on('game:reset', () => {
+    withRoom(socket, () => {
     if (socket.id !== hostId) return
     const humanPlayers = players.filter((player) => !player.id.endsWith('-bot'))
     const humanRoles: Role[] = ['Seer', 'Werewolf', 'Doctor']
@@ -205,9 +293,11 @@ io.on('connection', (socket) => {
     messages.push({ name: 'System', text: 'A new game begins. The village falls asleep.', time: now(), system: true })
     announce('A new game begins', 'The village has been reset for a fresh round.', 'success')
     emitState()
+    })
   })
 
   socket.on('night:action', (targetId: string) => {
+    withRoom(socket, () => {
     const actor = players.find((player) => player.id === socket.id)
     const target = players.find((player) => player.id === targetId)
     if (winner || phase !== 'night' || !actor?.alive || !target?.alive || target.id === actor.id || !['Werewolf', 'Doctor'].includes(actor.role)) return
@@ -236,9 +326,11 @@ io.on('connection', (socket) => {
       nightActions.clear()
     }
     emitState()
+    })
   })
 
   socket.on('hunter:shoot', (targetId: string) => {
+    withRoom(socket, () => {
     if (socket.id !== pendingHunterId || winner) return
     const target = players.find((player) => player.id === targetId)
     if (!target?.alive || target.id === socket.id) return
@@ -252,9 +344,11 @@ io.on('connection', (socket) => {
     else if (wolves >= villagers) { winner = 'werewolves'; announce('The werewolves win', 'The wolves now control the village.', 'danger') }
     else { phase = 'night'; night += 1; phaseEndsAt = Date.now() + 120_000 }
     emitState()
+    })
   })
 
   socket.on('vote:submit', (targetId: string) => {
+    withRoom(socket, () => {
     const voter = players.find((player) => player.id === socket.id)
     const target = players.find((player) => player.id === targetId)
     if (winner || phase !== 'day' || !voter?.alive || !target?.alive || target.id === voter.id) return
@@ -283,9 +377,11 @@ io.on('connection', (socket) => {
       votes.clear()
     }
     emitState()
+    })
   })
 
   socket.on('seer:inspect', (targetId: string) => {
+    withRoom(socket, () => {
     const seer = players.find((player) => player.id === socket.id)
     const target = players.find((player) => player.id === targetId)
     if (!seer || seer.role !== 'Seer' || phase !== 'night' || !target || !target.alive || target.id === seer.id) return
@@ -299,9 +395,11 @@ io.on('connection', (socket) => {
       myNightAction: nightActions.get(socket.id) ?? null,
       messages,
     })
+    })
   })
 
   socket.on('disconnect', () => {
+    withRoom(socket, () => {
     const index = players.findIndex((player) => player.id === socket.id)
     if (index >= 0) {
       const [leaver] = players.splice(index, 1)
@@ -314,6 +412,7 @@ io.on('connection', (socket) => {
     if (pendingHunterId === socket.id) pendingHunterId = null
     if (hostId === socket.id) hostId = io.sockets.sockets.keys().next().value ?? ''
     emitState()
+    })
   })
 })
 
