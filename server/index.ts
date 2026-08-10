@@ -1,10 +1,19 @@
 import { createServer } from 'node:http'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { Server } from 'socket.io'
 
 const PORT = Number(process.env.PORT ?? 3001)
 const DIST_DIR = join(process.cwd(), 'dist')
+const contentTypes: Record<string, string> = {
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.json': 'application/json; charset=utf-8',
+}
 const ROOM = 'MILL-7Q2'
 type Phase = 'lobby' | 'night' | 'day'
 type Role = 'Seer' | 'Werewolf' | 'Villager' | 'Doctor' | 'Hunter'
@@ -48,8 +57,13 @@ const httpServer = createServer((request, response) => {
     response.end('Not found')
     return
   }
-  response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-  response.end(readFileSync(join(DIST_DIR, 'index.html')))
+  const requestPath = new URL(request.url ?? '/', 'http://localhost').pathname
+  const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '')
+  const candidate = join(DIST_DIR, relativePath)
+  const filePath = existsSync(candidate) && statSync(candidate).isFile() ? candidate : join(DIST_DIR, 'index.html')
+  const extension = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
+  response.writeHead(200, { 'content-type': contentTypes[extension] ?? 'application/octet-stream' })
+  response.end(readFileSync(filePath))
 })
 const io = new Server(httpServer, { cors: { origin: process.env.CORS_ORIGIN ?? true } })
 const now = () => new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
