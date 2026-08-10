@@ -53,12 +53,17 @@ function App() {
   const [draft, setDraft] = useState('')
   const [copied, setCopied] = useState(false)
   const [clock, setClock] = useState(Date.now())
+  const [connected, setConnected] = useState(socket.connected)
   const [notice, setNotice] = useState<GameEvent | { id: number; title: string; detail: string; tone: 'info' } | null>(null)
   const [deathCause, setDeathCause] = useState<DeathCause>(null)
   const seenEvent = useRef(0)
   const wasAlive = useRef<boolean | null>(null)
 
   useEffect(() => {
+    const handleConnect = () => setConnected(true)
+    const handleDisconnect = () => setConnected(false)
+    socket.on('connect', handleConnect)
+    socket.on('disconnect', handleDisconnect)
     socket.on('game:state', (nextState: GameState) => {
       if (wasAlive.current === true && nextState.me && !nextState.me.alive) {
         setDeathCause(nextState.lastEvent?.title.includes('voted out') ? 'voted' : 'night')
@@ -78,7 +83,7 @@ function App() {
       playUiSound('info')
       window.setTimeout(() => setNotice((current) => current?.id === confirmation.id ? null : current), 3200)
     })
-    return () => { socket.off('game:state'); socket.off('game:action-confirmed') }
+    return () => { socket.off('connect', handleConnect); socket.off('disconnect', handleDisconnect); socket.off('game:state'); socket.off('game:action-confirmed') }
   }, [])
 
   useEffect(() => {
@@ -127,6 +132,7 @@ function App() {
       </header>
 
       <section className="game-layout">
+        {!connected && <div className="connection-banner" role="alert"><span className="connection-pulse" /><div><strong>Connection lost</strong><span>The village is waiting. Your game state will resync when you reconnect.</span></div><button onClick={() => socket.connect()}>Reconnect</button></div>}
         {notice && <div className={`game-notice notice-${notice.tone}`} role="status"><span className="notice-mark">{notice.tone === 'danger' ? '!' : notice.tone === 'success' ? '✓' : '·'}</span><div><strong>{notice.title}</strong><span>{notice.detail}</span></div><button onClick={() => setNotice(null)} aria-label="Dismiss notification">×</button></div>}
         <aside className="left-rail">
           <div className="eyebrow"><span className="live-dot" /> {isLobby ? 'ROOM OPEN' : `NIGHT ${String(state.night).padStart(2, '0')}`}</div>
@@ -155,7 +161,7 @@ function App() {
 
         <aside className="chat-panel"><div className="chat-head"><div><span className="section-label">VILLAGE CHAT</span><h2>Town square <span className="online-count">{state.players.length} online</span></h2></div><button className="icon-btn"><Mic size={17} /></button></div><div className="chat-messages">{state.messages.map((message, index) => <div className={`message ${message.system ? 'system-message' : ''}`} key={`${message.time}-${index}`}><div className="message-meta"><strong>{message.name}</strong><span>{message.time}</span></div><p>{message.text}</p></div>)}</div><div className="chat-compose"><input value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && sendMessage()} placeholder="Say something to the village..." /><button onClick={sendMessage} aria-label="Send message"><Send size={17} /></button></div><div className="chat-foot"><DoorOpen size={14} /> Room is invite-only <span>·</span> <button onClick={copyRoom}>Invite players</button></div></aside>
       </section>
-      <footer className="footer"><span>Millers Hollow Online</span><span>Room host: <b>{isHost ? 'You' : 'Another player'}</b></span><span className="connection"><span className="live-dot" /> Connected</span></footer>
+      <footer className="footer"><span>Millers Hollow Online</span><span>Room host: <b>{isHost ? 'You' : 'Another player'}</b></span><span className={`connection ${connected ? '' : 'offline'}`}><span className="live-dot" /> {connected ? 'Connected' : 'Offline'}</span></footer>
     </main>
   )
 }
