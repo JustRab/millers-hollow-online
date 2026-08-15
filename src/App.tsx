@@ -6,7 +6,6 @@ import {
   Send,
   Shield,
   Eye,
-  Mic,
   Volume2,
   Copy,
   Check,
@@ -15,7 +14,6 @@ import {
   ChevronRight,
   Skull,
   ScrollText,
-  Settings2,
   Sparkles,
   Clock3,
   AlertTriangle,
@@ -542,8 +540,6 @@ function App() {
           >
             <Volume2 size={18} />
           </button>
-          <button className="icon-btn" aria-label="Game settings"><Settings2 size={18} /></button>
-          <div className="profile-mini">{me.name.slice(0, 2).toUpperCase()}</div>
         </div>
       </header>
 
@@ -814,7 +810,6 @@ function App() {
               <span className="section-label">VILLAGE CHAT</span>
               <h2>Town square <span className="online-count">{state.players.length} online</span></h2>
             </div>
-            <button className="icon-btn"><Mic size={17} /></button>
           </div>
 
           <div className="chat-messages">
