@@ -561,8 +561,15 @@ function emitState(roomCode: string) {
       inspections: Object.fromEntries(room.inspections.get(socket.id) ?? []),
       myVote: room.phase === "day" ? (room.votes.get(socket.id) ?? null) : null,
       voteCounts: room.phase === "day" ? voteCounts(room) : {},
+      votedIds:
+        room.phase === "day" ? [...room.votes.keys()] : [],
       voteRevealUntil: room.voteRevealUntil,
       myNightAction: room.nightActions.get(socket.id) ?? null,
+      roleActionUnavailable: Boolean(
+        me &&
+          ((me.role === "Cupid" && room.cupidUsedIds.has(me.id)) ||
+            (me.role === "Maid" && room.maidUsed)),
+      ),
       messages: room.messages,
       wolfChatMessages: canSeeWolfChat ? room.wolfChatMessages : [],
       wolfChatVisible: canSeeWolfChat,
@@ -577,6 +584,97 @@ function emitState(roomCode: string) {
       voteHistory: room.voteHistory,
     });
   }
+}
+
+function resolveDayVote(roomCode: string) {
+  const room = getRoom(roomCode);
+  room.voteRevealUntil = 0;
+
+  const totals = new Map<string, number>();
+  for (const [voterId, votedId] of room.votes.entries()) {
+    const voter = room.players.find((player) => player.id === voterId);
+    if (!voter || voter.role === "GirlOfTheNight") continue;
+    totals.set(votedId, (totals.get(votedId) ?? 0) + 1);
+  }
+
+  const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]);
+  const highest = ranked[0]?.[1] ?? 0;
+  const tied = ranked.filter(([, count]) => count === highest).length > 1;
+
+  if (!tied && ranked[0]) {
+    const eliminated = room.players.find(
+      (player) => player.id === ranked[0][0],
+    );
+    if (eliminated && eliminated.alive) {
+      const doctor = room.players.find(
+        (player) => player.alive && player.role === "Doctor",
+      );
+      const doctorCanDecide =
+        doctor &&
+        !room.doctorUsedIds.has(doctor.id) &&
+        room.pendingDoctorTargetId === null;
+
+      if (doctorCanDecide) {
+        setDoctorPrompt(room, eliminated.id, "vote");
+        emitState(roomCode);
+        return;
+      }
+
+      eliminated.alive = false;
+      room.revealedRoleIds.add(eliminated.id);
+      addRoomMessage(room, {
+        name: "System",
+        text: `${eliminated.name} was voted out by the village. Role: ${eliminated.role}.`,
+        time: now(),
+        system: true,
+      });
+      setLastEvent(
+        room,
+        `${eliminated.name} was voted out`,
+        `The village made its choice. Role: ${eliminated.role}.`,
+        "danger",
+      );
+      applyLoverLinkDeath(room, eliminated.id);
+      room.voteHistory.push({
+        phase: room.night,
+        votedOut: {
+          id: eliminated.id,
+          name: eliminated.name,
+          role: eliminated.role,
+        },
+        votes: new Map(room.votes),
+      });
+
+      if (eliminated.role === "Hunter" && io.sockets.sockets.has(eliminated.id)) {
+        room.pendingHunterId = eliminated.id;
+        room.phaseEndsAt = Date.now() + 30_000;
+        room.votes.clear();
+        emitState(roomCode);
+        return;
+      }
+    }
+  } else {
+    addRoomMessage(room, {
+      name: "System",
+      text: "The vote was tied. Nobody was eliminated.",
+      time: now(),
+      system: true,
+    });
+    setLastEvent(
+      room,
+      "The vote was tied",
+      "Nobody was eliminated. The night continues.",
+      "info",
+    );
+  }
+
+  room.votes.clear();
+  if (!checkWinner(room)) {
+    room.phase = "night";
+    room.night += 1;
+    room.phaseEndsAt = Date.now() + 120_000;
+  }
+  emitState(roomCode);
 }
 
 function resolveNight(roomCode: string) {
@@ -684,7 +782,8 @@ function resolveExpiredPhases() {
 
     if (room.voteRevealUntil) {
       if (Date.now() < room.voteRevealUntil) continue;
-      room.voteRevealUntil = 0;
+      resolveDayVote(roomCode);
+      continue;
     }
 
     if (room.pendingDoctorTargetId) {
@@ -825,9 +924,11 @@ function resolveExpiredPhases() {
       resolveNight(roomCode);
     } else {
       if (room.votes.size > 0) {
-        room.voteRevealUntil = Date.now() + 3_000;
-        room.phaseEndsAt = room.voteRevealUntil;
-        emitState(roomCode);
+        if (room.voteRevealUntil === 0) {
+          room.voteRevealUntil = Date.now() + 3_000;
+          room.phaseEndsAt = room.voteRevealUntil;
+          emitState(roomCode);
+        }
         continue;
       }
 
@@ -1574,7 +1675,8 @@ io.on("connection", (socket) => {
       !voter.alive ||
       !target.alive ||
       voter.id === target.id ||
-      room.winner
+      room.winner ||
+      room.voteRevealUntil > 0
     )
       return;
 
@@ -1601,95 +1703,6 @@ io.on("connection", (socket) => {
       room.phaseEndsAt = room.voteRevealUntil;
       emitState(roomCode);
       return;
-
-      const totals = new Map<string, number>();
-      for (const [voterId, votedId] of room.votes.entries()) {
-        const voter = room.players.find((player) => player.id === voterId);
-        if (!voter || voter.role === "GirlOfTheNight") continue;
-        totals.set(votedId, (totals.get(votedId) ?? 0) + 1);
-      }
-
-      const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]);
-      const highest = ranked[0]?.[1] ?? 0;
-      const tied = ranked.filter(([, count]) => count === highest).length > 1;
-
-      if (!tied && ranked[0]) {
-        const eliminated = room.players.find(
-          (player) => player.id === ranked[0][0],
-        );
-        if (eliminated && eliminated.alive) {
-          const doctor = room.players.find(
-            (player) => player.alive && player.role === "Doctor",
-          );
-          const doctorCanDecide =
-            doctor &&
-            !room.doctorUsedIds.has(doctor.id) &&
-            room.pendingDoctorTargetId === null;
-
-          if (doctorCanDecide) {
-            setDoctorPrompt(room, eliminated.id, "vote");
-            emitState(roomCode);
-            return;
-          } else {
-            eliminated.alive = false;
-            room.revealedRoleIds.add(eliminated.id);
-            addRoomMessage(room, {
-              name: "System",
-              text: `${eliminated.name} was voted out by the village. Role: ${eliminated.role}.`,
-              time: now(),
-              system: true,
-            });
-            setLastEvent(
-              room,
-              `${eliminated.name} was voted out`,
-              `The village made its choice. Role: ${eliminated.role}.`,
-              "danger",
-            );
-            applyLoverLinkDeath(room, eliminated.id);
-
-            room.voteHistory.push({
-              phase: room.night,
-              votedOut: {
-                id: eliminated.id,
-                name: eliminated.name,
-                role: eliminated.role,
-              },
-              votes: new Map(room.votes),
-            });
-
-            if (
-              eliminated.role === "Hunter" &&
-              io.sockets.sockets.has(eliminated.id)
-            ) {
-              room.pendingHunterId = eliminated.id;
-              room.phaseEndsAt = Date.now() + 30_000;
-              room.votes.clear();
-              emitState(roomCode);
-              return;
-            }
-          }
-        }
-      } else {
-        addRoomMessage(room, {
-          name: "System",
-          text: "The vote was tied. Nobody was eliminated.",
-          time: now(),
-          system: true,
-        });
-        setLastEvent(
-          room,
-          "The vote was tied",
-          "Nobody was eliminated. The night continues.",
-          "info",
-        );
-      }
-
-      room.votes.clear();
-      if (!checkWinner(room)) {
-        room.phase = "night";
-        room.night += 1;
-        room.phaseEndsAt = Date.now() + 120_000;
-      }
     }
 
     emitState(roomCode);

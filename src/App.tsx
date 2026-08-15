@@ -76,7 +76,9 @@ type GameState = {
   myVote: string | null;
   myNightAction: string | null;
   voteCounts: Record<string, number>;
+  votedIds: string[];
   voteRevealUntil?: number;
+  roleActionUnavailable?: boolean;
   messages: Message[];
   wolfChatMessages?: Message[];
   wolfChatVisible?: boolean;
@@ -551,12 +553,23 @@ function App() {
     ? Math.max(0, Math.ceil((state.phaseEndsAt - clock) / 1000))
     : 0;
   const timerText = `${String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:${String(secondsLeft % 60).padStart(2, "0")}`;
-  const voteTotal = state
-    ? Object.values(state.voteCounts).reduce((total, count) => total + count, 0)
-    : 0;
   const voteRevealActive = Boolean(
     state?.voteRevealUntil && state.voteRevealUntil > clock,
   );
+  const revealProgress = voteRevealActive && state?.voteRevealUntil
+    ? Math.min(1, Math.max(0, 1 - (state.voteRevealUntil - clock) / 3000))
+    : 0;
+  const displayedVoteCounts = state
+    ? Object.fromEntries(
+        Object.entries(state.voteCounts).map(([playerId, count]) => [
+          playerId,
+          voteRevealActive ? Math.floor(count * revealProgress) : count,
+        ]),
+      )
+    : {};
+  const voteTotal = state
+    ? Object.values(displayedVoteCounts).reduce((total, count) => total + count, 0)
+    : 0;
   const livingCount =
     state?.players.filter((player) => player.alive).length ?? 0;
   const phaseProgress = state?.phaseEndsAt
@@ -999,7 +1012,8 @@ function App() {
             (me.role === "Seer" && (!isNight || !!state.myNightAction)) ||
             (me.role === "Werewolf" && !isNight) ||
             (me.role === "Maid" && (!isNight || !!state.myNightAction)) ||
-            (me.role === "Cupid" && !isNight) ||
+            (me.role === "Cupid" && (!isNight || state.roleActionUnavailable)) ||
+            (me.role === "Maid" && state.roleActionUnavailable) ||
             !["Seer", "Werewolf", "Maid", "Cupid"].includes(me.role)
           }
           onClick={handleRoleAction}
@@ -1010,9 +1024,13 @@ function App() {
             : me.role === "Werewolf"
               ? "Set wolf target"
               : me.role === "Maid"
-                ? "Swap role"
+                ? state.roleActionUnavailable
+                  ? "Swap unavailable"
+                  : "Swap role"
                 : me.role === "Cupid"
-                  ? "Bind selected lovers"
+                  ? state.roleActionUnavailable
+                    ? "Binding unavailable"
+                    : "Bind selected lovers"
                   : "Action unavailable"}
         </button>
       </>
@@ -1592,8 +1610,13 @@ function App() {
             {state.players.map((player) => {
               const isPlayerReady = state.readyIds.includes(player.id);
               const votedFor = state.myVote === player.id;
-              const hasVotes = isDay && state.voteCounts[player.id] > 0;
-              const hasFinalVoteCount = voteRevealActive && state.voteCounts[player.id] > 0;
+              const hasVoted = isDay && state.votedIds.includes(player.id);
+              const liveVoteCount = displayedVoteCounts[player.id] ?? 0;
+              const hasVotes = isDay && liveVoteCount > 0;
+              const hasFinalVoteCount =
+                voteRevealActive && state.voteCounts[player.id] > 0;
+              const showVoteCount =
+                isDay && (liveVoteCount > 0 || hasFinalVoteCount);
               const watched = Boolean(
                 state.wolfWatchedIds?.includes(player.id),
               );
@@ -1601,7 +1624,7 @@ function App() {
               return (
                 <button
                   key={player.id}
-                  className={`player-tile ${selected === player.id ? "selected" : ""} ${votedFor ? "voted-for" : ""} ${hasVotes ? "has-votes" : ""} ${hasFinalVoteCount ? "vote-reveal" : ""} ${!player.alive ? "dead" : ""} ${player.id === me.id ? "self" : ""} ${watched ? "watched" : ""} ${isLover ? "lover" : ""}`}
+                  className={`player-tile ${selected === player.id ? "selected" : ""} ${votedFor ? "voted-for" : ""} ${hasVoted ? "voted-by-player" : ""} ${hasVotes ? "has-votes" : ""} ${hasFinalVoteCount ? "vote-reveal" : ""} ${!player.alive ? "dead" : ""} ${player.id === me.id ? "self" : ""} ${watched ? "watched" : ""} ${isLover ? "lover" : ""}`}
                   onClick={() => {
                     if (!player.alive || player.id === me.id) return;
 
@@ -1647,12 +1670,13 @@ function App() {
                       {isPlayerReady ? "READY" : "WAITING"}
                     </span>
                   )}
-                  {isDay && player.alive && state.voteCounts[player.id] > 0 && (
+                  {showVoteCount && player.alive && (
                     <span className="vote-count">
-                      {state.voteCounts[player.id]} vote
-                      {state.voteCounts[player.id] === 1 ? "" : "s"}
+                      {liveVoteCount} vote
+                      {liveVoteCount === 1 ? "" : "s"}
                     </span>
                   )}
+                  {hasVoted && <span className="voted-marker">VOTED</span>}
                   {votedFor && (
                     <span className="your-vote-marker" aria-label="Your vote">
                       YOUR VOTE

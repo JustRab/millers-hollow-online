@@ -514,6 +514,20 @@ button {
   background: #252f23;
 }
 
+.player-tile.voted-by-player {
+  border-color: #82b66d;
+  box-shadow: inset 0 0 0 1px rgba(130, 182, 109, 0.42), 0 0 12px rgba(130, 182, 109, 0.14);
+}
+
+.voted-marker {
+  margin-left: auto;
+  color: #b9d99e;
+  font:
+    500 9px "DM Mono",
+    monospace;
+  letter-spacing: 0.5px;
+}
+
 .your-vote-marker {
   color: #b9d99e;
   font:
