@@ -1,12 +1,32 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
-import { Moon, Sun, Send, Shield, Eye, Mic, Volume2, Copy, Check, Users, DoorOpen, ChevronRight, Skull, ScrollText, Settings2 } from 'lucide-react'
+import {
+  Moon,
+  Sun,
+  Send,
+  Shield,
+  Eye,
+  Mic,
+  Volume2,
+  Copy,
+  Check,
+  Users,
+  DoorOpen,
+  ChevronRight,
+  Skull,
+  ScrollText,
+  Settings2,
+  Sparkles,
+  Clock3,
+  AlertTriangle,
+} from 'lucide-react'
 
 type Phase = 'lobby' | 'night' | 'day'
 type Player = { id: string; name: string; alive: boolean }
 type Message = { name: string; text: string; time: string; system?: boolean }
 type GameEvent = { id: number; title: string; detail: string; tone: 'info' | 'danger' | 'success' }
 type DeathCause = 'voted' | 'night' | null
+
 type GameState = {
   room: string
   phase: Phase
@@ -16,6 +36,7 @@ type GameState = {
   winner: 'village' | 'werewolves' | null
   lastEvent: GameEvent | null
   pendingHunterId: string | null
+  readyIds: string[]
   players: Player[]
   me: { id: string; name: string; role: string; alive: boolean } | null
   inspections: Record<string, string>
@@ -23,7 +44,13 @@ type GameState = {
   myNightAction: string | null
   voteCounts: Record<string, number>
   messages: Message[]
+  wolfChatMessages?: Message[]
+  wolfChatVisible?: boolean
+  girlPeekActive?: boolean
+  wolfWatchedIds?: string[]
 }
+
+type SoundCue = 'join' | 'chat' | 'vote' | 'action' | 'protect' | 'phase' | 'death' | 'tie' | 'success' | 'danger' | 'info'
 
 const socket: Socket = io()
 let sharedAudioContext: AudioContext | null = null
@@ -34,42 +61,49 @@ function primeAudio() {
   void sharedAudioContext.resume()
 }
 
-type SoundCue = 'join' | 'chat' | 'vote' | 'action' | 'protect' | 'phase' | 'death' | 'tie' | 'success' | 'danger' | 'info'
-
 function playUiSound(kind: SoundCue, enabled: boolean) {
-  if (!enabled) return
-  if (!window.AudioContext) return
+  if (!enabled || !window.AudioContext) return
+
   sharedAudioContext ??= new window.AudioContext()
   const audioContext = sharedAudioContext
   if (audioContext.state === 'suspended') void audioContext.resume()
+
   const patterns: Record<SoundCue, { notes: number[]; type: OscillatorType; gap: number; length: number }> = {
-    join: { notes: [262, 392, 523], type: 'sine', gap: .09, length: .2 },
-    chat: { notes: [660, 880], type: 'sine', gap: .06, length: .1 },
-    vote: { notes: [220, 277], type: 'triangle', gap: .08, length: .16 },
-    action: { notes: [330, 440], type: 'square', gap: .07, length: .13 },
-    protect: { notes: [392, 523, 659], type: 'sine', gap: .1, length: .2 },
-    phase: { notes: [196, 294, 392], type: 'triangle', gap: .12, length: .24 },
-    death: { notes: [196, 147, 110], type: 'sawtooth', gap: .13, length: .3 },
-    tie: { notes: [294, 294], type: 'square', gap: .16, length: .12 },
-    success: { notes: [392, 494, 587, 784], type: 'sine', gap: .09, length: .24 },
-    danger: { notes: [165, 123, 92], type: 'sawtooth', gap: .14, length: .3 },
-    info: { notes: [330], type: 'sine', gap: 0, length: .18 },
+    join: { notes: [262, 392, 523], type: 'sine', gap: 0.09, length: 0.2 },
+    chat: { notes: [660, 880], type: 'sine', gap: 0.06, length: 0.1 },
+    vote: { notes: [220, 277], type: 'triangle', gap: 0.08, length: 0.16 },
+    action: { notes: [330, 440], type: 'square', gap: 0.07, length: 0.13 },
+    protect: { notes: [392, 523, 659], type: 'sine', gap: 0.1, length: 0.2 },
+    phase: { notes: [196, 294, 392], type: 'triangle', gap: 0.12, length: 0.24 },
+    death: { notes: [196, 147, 110], type: 'sawtooth', gap: 0.13, length: 0.3 },
+    tie: { notes: [294, 294], type: 'square', gap: 0.16, length: 0.12 },
+    success: { notes: [392, 494, 587, 784], type: 'sine', gap: 0.09, length: 0.24 },
+    danger: { notes: [165, 123, 92], type: 'sawtooth', gap: 0.14, length: 0.3 },
+    info: { notes: [330], type: 'sine', gap: 0, length: 0.18 },
   }
+
   const pattern = patterns[kind]
-  const start = audioContext.currentTime + .01
+  const start = audioContext.currentTime + 0.01
+
   pattern.notes.forEach((frequency, index) => {
     const oscillator = audioContext.createOscillator()
     const gain = audioContext.createGain()
     const noteStart = start + index * pattern.gap
+
     oscillator.type = pattern.type
     oscillator.frequency.setValueAtTime(frequency, noteStart)
-    oscillator.frequency.exponentialRampToValueAtTime(frequency * (kind === 'death' || kind === 'danger' ? .72 : 1.04), noteStart + pattern.length)
-    gain.gain.setValueAtTime(.0001, noteStart)
-    gain.gain.exponentialRampToValueAtTime(kind === 'danger' || kind === 'death' ? .055 : .07, noteStart + .012)
-    gain.gain.exponentialRampToValueAtTime(.0001, noteStart + pattern.length)
+    oscillator.frequency.exponentialRampToValueAtTime(
+      frequency * (kind === 'death' || kind === 'danger' ? 0.72 : 1.04),
+      noteStart + pattern.length,
+    )
+
+    gain.gain.setValueAtTime(0.0001, noteStart)
+    gain.gain.exponentialRampToValueAtTime(kind === 'danger' || kind === 'death' ? 0.055 : 0.07, noteStart + 0.012)
+    gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + pattern.length)
+
     oscillator.connect(gain).connect(audioContext.destination)
     oscillator.start(noteStart)
-    oscillator.stop(noteStart + pattern.length + .02)
+    oscillator.stop(noteStart + pattern.length + 0.02)
   })
 }
 
@@ -83,47 +117,105 @@ function eventSound(title: string, tone: GameEvent['tone']): SoundCue {
   return tone
 }
 
+function roleSummary(role: string): string {
+  switch (role) {
+    case 'Seer':
+      return 'Inspect one player each night to learn their true role.'
+    case 'Werewolf':
+      return 'Coordinate with the pack and remove villagers at night.'
+    case 'Doctor':
+      return 'Protect one player each night from elimination.'
+    case 'Hunter':
+      return 'If eliminated, you may fire one final shot.'
+    case 'Dog':
+      return 'At night, choose to side with villagers or wolves.'
+    case 'GirlOfTheNight':
+      return 'Peek at wolf chat briefly. If exposed, you die.'
+    case 'Cupid':
+      return 'Bind two players as lovers linked by fate.'
+    case 'Maid':
+      return 'Swap your role with another player at night.'
+    default:
+      return 'Gather clues, survive, and help your side win.'
+  }
+}
+
+function roleObjective(role: string): string {
+  if (role === 'Werewolf') return 'Outnumber the village while staying hidden.'
+  if (role === 'GirlOfTheNight') return 'Peek quickly and never get caught watching.'
+  if (role === 'Cupid') return 'Create a risky lover pair and read the table.'
+  return 'Identify the wolves before they control the village.'
+}
+
 function App() {
   const [state, setState] = useState<GameState | null>(null)
   const [nameDraft, setNameDraft] = useState(() => localStorage.getItem('millers-name') ?? '')
   const [roomDraft, setRoomDraft] = useState(() => new URLSearchParams(window.location.search).get('room')?.toUpperCase() || 'MILL-7Q2')
   const [selected, setSelected] = useState('')
   const [draft, setDraft] = useState('')
+  const [wolfDraft, setWolfDraft] = useState('')
   const [copied, setCopied] = useState(false)
   const [clock, setClock] = useState(Date.now())
   const [connected, setConnected] = useState(socket.connected)
   const [audioEnabled, setAudioEnabled] = useState(() => localStorage.getItem('millers-audio') !== 'off')
   const [notice, setNotice] = useState<GameEvent | { id: number; title: string; detail: string; tone: 'info' } | null>(null)
   const [deathCause, setDeathCause] = useState<DeathCause>(null)
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
+
   const seenEvent = useRef(0)
   const wasAlive = useRef<boolean | null>(null)
 
   useEffect(() => {
     const handleConnect = () => setConnected(true)
     const handleDisconnect = () => setConnected(false)
+
     socket.on('connect', handleConnect)
     socket.on('disconnect', handleDisconnect)
+
     socket.on('game:state', (nextState: GameState) => {
       if (wasAlive.current === true && nextState.me && !nextState.me.alive) {
         setDeathCause(nextState.lastEvent?.title.includes('voted out') ? 'voted' : 'night')
       }
+
       wasAlive.current = nextState.me?.alive ?? null
       setState(nextState)
+
       if (nextState.lastEvent && nextState.lastEvent.id > seenEvent.current) {
         seenEvent.current = nextState.lastEvent.id
         setNotice(nextState.lastEvent)
         playUiSound(eventSound(nextState.lastEvent.title, nextState.lastEvent.tone), audioEnabled)
-        window.setTimeout(() => setNotice((current) => current?.id === nextState.lastEvent?.id ? null : current), 4200)
+        window.setTimeout(() => {
+          setNotice((current) => (current?.id === nextState.lastEvent?.id ? null : current))
+        }, 4200)
       }
     })
+
     socket.on('game:action-confirmed', (event: { title: string; detail: string }) => {
       const confirmation = { ...event, id: Date.now(), tone: 'info' as const }
       setNotice(confirmation)
-      playUiSound(event.title.toLowerCase().includes('vote') ? 'vote' : event.title.toLowerCase().includes('protection') ? 'protect' : 'action', audioEnabled)
-      window.setTimeout(() => setNotice((current) => current?.id === confirmation.id ? null : current), 3200)
+      playUiSound(
+        event.title.toLowerCase().includes('vote')
+          ? 'vote'
+          : event.title.toLowerCase().includes('protection')
+            ? 'protect'
+            : 'action',
+        audioEnabled,
+      )
+
+      window.setTimeout(() => {
+        setNotice((current) => (current?.id === confirmation.id ? null : current))
+      }, 3200)
     })
+
     socket.on('chat:received', () => playUiSound('chat', audioEnabled))
-    return () => { socket.off('connect', handleConnect); socket.off('disconnect', handleDisconnect); socket.off('game:state'); socket.off('game:action-confirmed'); socket.off('chat:received') }
+
+    return () => {
+      socket.off('connect', handleConnect)
+      socket.off('disconnect', handleDisconnect)
+      socket.off('game:state')
+      socket.off('game:action-confirmed')
+      socket.off('chat:received')
+    }
   }, [audioEnabled])
 
   useEffect(() => {
@@ -135,6 +227,7 @@ function App() {
     const cleanName = nameDraft.trim().slice(0, 18)
     const cleanRoom = roomDraft.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 16)
     if (!cleanName || !cleanRoom) return
+
     primeAudio()
     playUiSound('join', audioEnabled)
     localStorage.setItem('millers-name', cleanName)
@@ -142,70 +235,612 @@ function App() {
   }
 
   if (!state || !state.me) {
-    return <main className="app night join-screen"><div className="join-card"><div className="brand"><span className="brand-mark"><Moon size={17} fill="currentColor" /></span><span>Millers Hollow</span></div><span className="section-label">JOIN THE VILLAGE</span><h1>Choose your seat</h1><p>Enter a name and room code. Share the room link with the people you want in your village.</p><label className="join-label" htmlFor="room-code">ROOM CODE</label><input id="room-code" className="join-input" maxLength={16} value={roomDraft} onChange={(event) => setRoomDraft(event.target.value.toUpperCase())} onKeyDown={(event) => event.key === 'Enter' && joinGame()} placeholder="MILL-7Q2" /><label className="join-label" htmlFor="player-name">YOUR NAME</label><div className="join-form"><input id="player-name" autoFocus maxLength={18} value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && joinGame()} placeholder="Your village name" /><button className="primary-btn" disabled={!nameDraft.trim() || !roomDraft.trim()} onClick={joinGame}>Enter the village <ChevronRight size={16} /></button></div></div></main>
+    return (
+      <main className="app night join-screen">
+        <div className="join-card">
+          <div className="brand">
+            <span className="brand-mark"><Moon size={17} fill="currentColor" /></span>
+            <span>Millers Hollow</span>
+          </div>
+          <span className="section-label">JOIN THE VILLAGE</span>
+          <h1>Choose your seat</h1>
+          <p>Enter a name and room code. Share the room link with the people you want in your village.</p>
+
+          <label className="join-label" htmlFor="room-code">ROOM CODE</label>
+          <input
+            id="room-code"
+            className="join-input"
+            maxLength={16}
+            value={roomDraft}
+            onChange={(event) => setRoomDraft(event.target.value.toUpperCase())}
+            onKeyDown={(event) => event.key === 'Enter' && joinGame()}
+            placeholder="MILL-7Q2"
+          />
+
+          <label className="join-label" htmlFor="player-name">YOUR NAME</label>
+          <div className="join-form">
+            <input
+              id="player-name"
+              autoFocus
+              maxLength={18}
+              value={nameDraft}
+              onChange={(event) => setNameDraft(event.target.value)}
+              onKeyDown={(event) => event.key === 'Enter' && joinGame()}
+              placeholder="Your village name"
+            />
+            <button className="primary-btn" disabled={!nameDraft.trim() || !roomDraft.trim()} onClick={joinGame}>
+              Enter the village <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      </main>
+    )
   }
 
   const { me, phase } = state
   const isLobby = phase === 'lobby'
   const isDead = !me.alive
+  const isNight = phase === 'night'
+  const isDay = phase === 'day'
+  const humans = state.players.filter((player) => !player.id.endsWith('-bot'))
+  const isReady = state.readyIds.includes(me.id)
+  const readyCount = humans.filter((player) => state.readyIds.includes(player.id)).length
+  const allPlayersReady = humans.length > 1 && humans.every((player) => state.readyIds.includes(player.id))
   const selectedPlayer = state.players.find((player) => player.id === selected)
   const inspectedRole = selected ? state.inspections[selected] : undefined
   const isHost = state.hostId === me.id
   const canHunterAct = me.role === 'Hunter' && state.pendingHunterId === me.id
   const secondsLeft = Math.max(0, Math.ceil((state.phaseEndsAt - clock) / 1000))
   const timerText = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`
-  const toggleAudio = () => { const next = !audioEnabled; setAudioEnabled(next); localStorage.setItem('millers-audio', next ? 'on' : 'off') }
-  const copyRoom = async () => { await navigator.clipboard?.writeText(`${window.location.origin}?room=${state.room}`); setCopied(true); window.setTimeout(() => setCopied(false), 1800) }
-  const sendMessage = () => { const text = draft.trim(); if (!text) return; socket.emit('chat:send', text); setDraft('') }
-  const inspect = () => {
-    if (!selectedPlayer) return
-    if (canHunterAct) socket.emit('hunter:shoot', selectedPlayer.id)
-    else if (me.role === 'Werewolf' || me.role === 'Doctor') socket.emit('night:action', selectedPlayer.id)
-    else socket.emit('seer:inspect', selectedPlayer.id)
-  }
-  const submitVote = () => { if (selectedPlayer) socket.emit('vote:submit', selectedPlayer.id) }
   const voteTotal = Object.values(state.voteCounts).reduce((total, count) => total + count, 0)
   const livingCount = state.players.filter((player) => player.alive).length
+  const phaseProgress = state.phaseEndsAt
+    ? Math.max(0, Math.min(100, Math.round((secondsLeft / (isNight ? 120 : 180)) * 100)))
+    : 0
+  const recentSystemEvents = useMemo(
+    () => state.messages.filter((message) => message.system).slice(-4).reverse(),
+    [state.messages],
+  )
+
+  const helperHints = useMemo(() => {
+    if (!me.alive) {
+      return canHunterAct
+        ? ['You still have a final Hunter shot.', 'Pick one living player before the timer ends.']
+        : ['You are spectating now.', 'Track votes and chat to help your team after the round.']
+    }
+
+    if (isLobby) {
+      return [
+        isReady ? 'You are marked ready.' : 'Set ready to help the host start.',
+        isHost ? 'Host can start after all human players are ready.' : 'Wait for the host to start once everyone is ready.',
+      ]
+    }
+
+    if (isNight) {
+      if (me.role === 'GirlOfTheNight') return ['Use peek only when needed.', 'Peeking exposes you after 1 second.']
+      if (me.role === 'Dog') return ['Choose your side once each night.', 'This choice can shift win conditions quickly.']
+      if (me.role === 'Werewolf') return ['Coordinate with wolf chat.', 'Submit your target before phase ends.']
+      if (me.role === 'Doctor') return ['Protect a likely wolf target.', 'Try not to become predictable.']
+      if (me.role === 'Seer') return ['Inspect high-risk players first.', 'Use chat behavior to guide inspections.']
+      if (me.role === 'Maid') return ['Swap can change team power instantly.', 'Consider role timing before committing.']
+      if (me.role === 'Cupid') return ['Bind players who will impact future votes.', 'Lovers can create chain eliminations.']
+      return ['Watch chat carefully for tells.', 'Prepare a voting target for day.']
+    }
+
+    return [
+      state.myVote ? 'Your vote is locked.' : 'Submit your vote before phase end.',
+      'Track who pushes fast accusations and late vote swings.',
+    ]
+  }, [canHunterAct, isLobby, isNight, me.alive, me.role, isReady, isHost, state.myVote])
+
+  const toggleAudio = () => {
+    const next = !audioEnabled
+    setAudioEnabled(next)
+    localStorage.setItem('millers-audio', next ? 'on' : 'off')
+  }
+
+  const copyRoom = async () => {
+    await navigator.clipboard?.writeText(`${window.location.origin}?room=${state.room}`)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1800)
+  }
+
+  const sendMessage = () => {
+    const text = draft.trim()
+    if (!text) return
+    socket.emit('chat:send', text)
+    setDraft('')
+  }
+
+  const sendWolfMessage = () => {
+    const text = wolfDraft.trim()
+    if (!text) return
+    socket.emit('wolf:chat:send', text)
+    setWolfDraft('')
+  }
+
+  const handleRoleAction = () => {
+    if (!selectedPlayer) return
+
+    if (canHunterAct) {
+      socket.emit('hunter:shoot', selectedPlayer.id)
+      return
+    }
+
+    if (me.role === 'Werewolf' || me.role === 'Doctor' || me.role === 'Maid') {
+      socket.emit('night:action', selectedPlayer.id)
+      return
+    }
+
+    if (me.role === 'Seer') {
+      socket.emit('seer:inspect', selectedPlayer.id)
+      return
+    }
+
+    if (me.role === 'Cupid') {
+      socket.emit('cupid:bind', [me.id, selectedPlayer.id])
+    }
+  }
+
+  const submitVote = () => {
+    if (!selectedPlayer) return
+    socket.emit('vote:submit', selectedPlayer.id)
+  }
+
+  const actionTitle = canHunterAct
+    ? 'Choose your final shot'
+    : isDead
+      ? 'No actions available'
+      : me.role === 'Werewolf' || me.role === 'Doctor'
+        ? (state.myNightAction ? 'Night action submitted' : `Choose ${me.role === 'Werewolf' ? 'a victim' : 'someone to protect'}`)
+        : me.role === 'GirlOfTheNight'
+          ? (state.girlPeekActive ? 'Watching the wolves' : 'Peek into wolf chat')
+          : me.role === 'Dog'
+            ? 'Choose your faction'
+            : me.role === 'Cupid'
+              ? 'Bind two players'
+              : me.role === 'Maid'
+                ? (state.myNightAction ? 'Role swap submitted' : 'Swap roles with target')
+                : inspectedRole
+                  ? 'Vision received'
+                  : `Inspect ${selectedPlayer?.name ?? 'a player'}`
+
+  const renderRoleActionContent = () => {
+    if (canHunterAct) {
+      return (
+        <>
+          <p className="action-copy">You were eliminated, but the Hunter gets one final shot before leaving the village.</p>
+          <button className="primary-btn" disabled={!selectedPlayer} onClick={handleRoleAction}>
+            <Eye size={17} /> Fire at {selectedPlayer?.name ?? 'a player'}
+          </button>
+        </>
+      )
+    }
+
+    if (isDead) {
+      return <p className="action-copy">Your role has been revealed to you, but you can no longer affect the living village.</p>
+    }
+
+    if (me.role === 'GirlOfTheNight') {
+      return (
+        <>
+          <p className="action-copy">Peek at wolf chat for 1 second. Wolves get a watched indicator when you peek.</p>
+          <button className="primary-btn" disabled={!isNight || state.girlPeekActive} onClick={() => socket.emit('girl:peek')}>
+            <Eye size={17} />
+            {state.girlPeekActive ? 'Watching...' : 'Peek into wolf chat'}
+          </button>
+        </>
+      )
+    }
+
+    if (me.role === 'Dog') {
+      return (
+        <>
+          <p className="action-copy">Choose your side tonight. This can reshape the game quickly.</p>
+          <div className="dual-actions">
+            <button className="secondary-btn" disabled={!isNight} onClick={() => socket.emit('dog:choose', 'villager')}>Side with village</button>
+            <button className="secondary-btn" disabled={!isNight} onClick={() => socket.emit('dog:choose', 'werewolf')}>Side with wolves</button>
+          </div>
+        </>
+      )
+    }
+
+    if (inspectedRole) {
+      return (
+        <div className="vision-result">
+          <div className="vision-sigil">{inspectedRole === 'Werewolf' ? 'W' : 'V'}</div>
+          <div>
+            <strong>{selectedPlayer?.name}</strong>
+            <p>This player is a <b>{inspectedRole}</b>.</p>
+          </div>
+          <button className="reset-action" onClick={() => setSelected('')}>Inspect again</button>
+        </div>
+      )
+    }
+
+    return (
+      <>
+        <p className="action-copy">
+          {me.role === 'Werewolf' || me.role === 'Doctor' || me.role === 'Maid' || me.role === 'Seer' || me.role === 'Cupid'
+            ? 'Select one living player to use your role action.'
+            : 'Watch the board and coordinate with your team.'}
+        </p>
+        <button
+          className="primary-btn"
+          disabled={
+            isDead ||
+            !selectedPlayer ||
+            (me.role === 'Seer' && !isNight) ||
+            ((me.role === 'Werewolf' || me.role === 'Doctor') && (!isNight || !!state.myNightAction)) ||
+            (me.role === 'Maid' && !isNight) ||
+            (me.role === 'Cupid' && !isNight) ||
+            !['Seer', 'Werewolf', 'Doctor', 'Maid', 'Cupid'].includes(me.role)
+          }
+          onClick={handleRoleAction}
+        >
+          <Eye size={17} />
+          {me.role === 'Seer'
+            ? 'Inspect player'
+            : me.role === 'Werewolf'
+              ? 'Choose victim'
+              : me.role === 'Doctor'
+                ? 'Protect player'
+                : me.role === 'Maid'
+                  ? 'Swap role'
+                  : me.role === 'Cupid'
+                    ? 'Bind lovers'
+                    : 'Action unavailable'}
+        </button>
+      </>
+    )
+  }
 
   return (
     <main className={`${phase === 'night' ? 'app night' : phase === 'day' ? 'app day' : 'app lobby'} ${isDead ? 'spectator-mode' : ''} ${deathCause ? `death-${deathCause}` : ''}`}>
       <header className="topbar">
-        <div className="brand"><span className="brand-mark"><Moon size={17} fill="currentColor" /></span><span>Millers Hollow</span><span className="brand-tag">ONLINE</span></div>
-        <div className="room-pill"><span className="live-dot" /> ROOM <strong>{state.room}</strong><button onClick={copyRoom} aria-label="Copy room code">{copied ? <Check size={14} /> : <Copy size={14} />}</button></div>
-        <div className="top-actions"><button className={`icon-btn ${audioEnabled ? '' : 'muted'}`} onClick={toggleAudio} aria-label={audioEnabled ? 'Mute event sounds' : 'Enable event sounds'} title={audioEnabled ? 'Mute event sounds' : 'Enable event sounds'}>{audioEnabled ? <Volume2 size={18} /> : <Volume2 size={18} />}</button><button className="icon-btn" aria-label="Game settings"><Settings2 size={18} /></button><div className="profile-mini">{me.name.slice(0, 2).toUpperCase()}</div></div>
+        <div className="brand">
+          <span className="brand-mark"><Moon size={17} fill="currentColor" /></span>
+          <span>Millers Hollow</span>
+          <span className="brand-tag">ONLINE</span>
+        </div>
+
+        <div className="room-pill">
+          <span className="live-dot" /> ROOM <strong>{state.room}</strong>
+          <button onClick={copyRoom} aria-label="Copy room code">
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+        </div>
+
+        <div className="top-actions">
+          <button
+            className={`icon-btn ${audioEnabled ? '' : 'muted'}`}
+            onClick={toggleAudio}
+            aria-label={audioEnabled ? 'Mute event sounds' : 'Enable event sounds'}
+            title={audioEnabled ? 'Mute event sounds' : 'Enable event sounds'}
+          >
+            <Volume2 size={18} />
+          </button>
+          <button className="icon-btn" aria-label="Game settings"><Settings2 size={18} /></button>
+          <div className="profile-mini">{me.name.slice(0, 2).toUpperCase()}</div>
+        </div>
       </header>
 
       <section className="game-layout">
-        {!connected && <div className="connection-banner" role="alert"><span className="connection-pulse" /><div><strong>Connection lost</strong><span>The village is waiting. Your game state will resync when you reconnect.</span></div><button onClick={() => socket.connect()}>Reconnect</button></div>}
-        {notice && <div className={`game-notice notice-${notice.tone}`} role="status"><span className="notice-mark">{notice.tone === 'danger' ? '!' : notice.tone === 'success' ? '✓' : '·'}</span><div><strong>{notice.title}</strong><span>{notice.detail}</span></div><button onClick={() => setNotice(null)} aria-label="Dismiss notification">×</button></div>}
+        {!connected && (
+          <div className="connection-banner" role="alert">
+            <span className="connection-pulse" />
+            <div>
+              <strong>Connection lost</strong>
+              <span>The village is waiting. Your game state will resync when you reconnect.</span>
+            </div>
+            <button onClick={() => socket.connect()}>Reconnect</button>
+          </div>
+        )}
+
+        {notice && (
+          <div className={`game-notice notice-${notice.tone}`} role="status">
+            <span className="notice-mark">{notice.tone === 'danger' ? '!' : notice.tone === 'success' ? 'OK' : 'i'}</span>
+            <div>
+              <strong>{notice.title}</strong>
+              <span>{notice.detail}</span>
+            </div>
+            <button onClick={() => setNotice(null)} aria-label="Dismiss notification">x</button>
+          </div>
+        )}
+
         <aside className="left-rail">
           <div className="eyebrow"><span className="live-dot" /> {isLobby ? 'ROOM OPEN' : `NIGHT ${String(state.night).padStart(2, '0')}`}</div>
-          <div className="phase-title"><span className="phase-icon">{phase === 'night' ? <Moon size={28} fill="currentColor" /> : phase === 'day' ? <Sun size={28} /> : <Users size={28} />}</span><div><h1>{isLobby ? 'Gather the village' : phase === 'night' ? 'The village sleeps' : 'The village wakes'}</h1><p>{isLobby ? 'Everyone is here. Waiting for the host.' : phase === 'night' ? 'Choose your target in secret.' : 'Talk. Watch. Decide together.'}</p></div></div>
-          <div className="timer"><div><span className="timer-label">{isLobby ? 'PLAYERS IN ROOM' : 'PHASE ENDS IN'}</span><strong>{isLobby ? state.players.length : timerText}</strong></div><div className="timer-ring">{isLobby ? 'L' : phase === 'night' ? 'N' : 'D'}</div></div>
-          <div className="role-card"><div className="role-kicker"><Eye size={14} /> YOUR ROLE</div><div className="role-name">{me.role}</div><p>{me.role === 'Seer' ? 'Each night, learn the true identity of one player.' : 'Work with your team and survive until the end.'}</p><div className="role-secret"><Shield size={15} /><span>Only you can see this</span></div></div>
-          <div className="objective"><span className="section-label">YOUR OBJECTIVE</span><p>{me.role === 'Werewolf' ? 'Stay hidden and eliminate the village.' : 'Find the wolves before they outnumber the village.'}</p></div>
-          {isLobby && isHost && <button className="secondary-btn" onClick={() => socket.emit('game:start')}><Sun size={16} /> Start game<ChevronRight size={15} /></button>}
-          {!isLobby && isHost && !state.winner && <button className="secondary-btn" disabled={isDead} onClick={() => socket.emit('phase:toggle')}>{phase === 'night' ? <Sun size={16} /> : <Moon size={16} />}{phase === 'night' ? 'Start day phase' : 'Start night phase'}<ChevronRight size={15} /></button>}
+
+          <div className="phase-title">
+            <span className="phase-icon">
+              {phase === 'night' ? <Moon size={28} fill="currentColor" /> : phase === 'day' ? <Sun size={28} /> : <Users size={28} />}
+            </span>
+            <div>
+              <h1>{isLobby ? 'Gather the village' : phase === 'night' ? 'The village sleeps' : 'The village wakes'}</h1>
+              <p>{isLobby ? 'Everyone is here. Waiting for the host.' : phase === 'night' ? 'Choose your target in secret.' : 'Talk. Watch. Decide together.'}</p>
+            </div>
+          </div>
+
+          <div className="timer">
+            <div>
+              <span className="timer-label">{isLobby ? 'READY PLAYERS' : 'PHASE ENDS IN'}</span>
+              <strong>{isLobby ? `${readyCount}/${humans.length}` : timerText}</strong>
+            </div>
+            <div className="timer-ring">{isLobby ? 'L' : phase === 'night' ? 'N' : 'D'}</div>
+          </div>
+
+          {!isLobby && (
+            <div className="phase-health">
+              <div className="phase-health-head">
+                <span><Clock3 size={13} /> PHASE PRESSURE</span>
+                <strong>{phaseProgress}%</strong>
+              </div>
+              <div className="phase-health-track"><span style={{ width: `${phaseProgress}%` }} /></div>
+            </div>
+          )}
+
+          <div className="role-card">
+            <div className="role-kicker"><Eye size={14} /> YOUR ROLE</div>
+            <div className="role-name">{me.role}</div>
+            <p>{roleSummary(me.role)}</p>
+            <div className="role-secret"><Shield size={15} /><span>Only you can see this</span></div>
+          </div>
+
+          <div className="objective">
+            <span className="section-label">YOUR OBJECTIVE</span>
+            <p>{roleObjective(me.role)}</p>
+          </div>
+
+          <div className="helper-panel">
+            <span className="section-label">TACTICAL HINTS</span>
+            <ul>
+              {helperHints.map((hint, index) => (
+                <li key={`${hint}-${index}`}>{hint}</li>
+              ))}
+            </ul>
+          </div>
+
+          {isLobby && (
+            <>
+              <button className="secondary-btn" onClick={() => socket.emit('room:ready', !isReady)}>
+                {isReady ? 'Unready' : 'Ready up'}
+                <ChevronRight size={15} />
+              </button>
+              {isHost && (
+                <button className="secondary-btn" disabled={!allPlayersReady || humans.length < 2} onClick={() => socket.emit('game:start')}>
+                  <Sun size={16} />
+                  {allPlayersReady ? 'Start game' : `Waiting for ${humans.length - readyCount} more`}
+                  <ChevronRight size={15} />
+                </button>
+              )}
+            </>
+          )}
+
+          {!isLobby && isHost && !state.winner && (
+            <button className="secondary-btn" disabled={isDead} onClick={() => socket.emit('phase:toggle')}>
+              {phase === 'night' ? <Sun size={16} /> : <Moon size={16} />}
+              {phase === 'night' ? 'Start day phase' : 'Start night phase'}
+              <ChevronRight size={15} />
+            </button>
+          )}
         </aside>
 
         <section className="board-area">
-          {isDead && <div className="spectator-banner"><Skull size={19} /><div><span className="section-label">{canHunterAct ? 'FINAL MOMENT' : 'YOU ARE OUT'}</span><strong>{canHunterAct ? 'The Hunter gets one final shot.' : deathCause === 'voted' ? 'The village voted against you.' : 'The night claimed you.'}</strong><p>{canHunterAct ? 'Choose one living player before you leave the village.' : 'You can watch the village, but your actions are locked.'}</p></div></div>}
-          {isLobby && <div className="lobby-banner"><span className="winner-sigil">L</span><div><span className="section-label">WAITING ROOM</span><strong>{isHost ? 'You are the host.' : 'Waiting for the host to start.'}</strong><p>The game will begin when everyone is ready.</p></div></div>}
-          {state.winner && <div className="winner-banner"><span className="winner-sigil">{state.winner === 'village' ? 'V' : 'W'}</span><div><span className="section-label">GAME OVER</span><strong>{state.winner === 'village' ? 'The village survives.' : 'The werewolves take the village.'}</strong></div>{isHost && <button className="rematch-btn" onClick={() => socket.emit('game:reset')}>Play again</button>}</div>}
-          <div className="board-heading"><div><span className="eyebrow">LIVE VILLAGE</span><h2>Who is still standing?</h2></div><div className="player-count"><Users size={16} /> <strong>{livingCount}</strong> alive <span>/</span> {state.players.length} total</div></div>
-          <div className="roster">
-            {state.players.map((player) => <button key={player.id} className={`player-tile ${selected === player.id ? 'selected' : ''} ${!player.alive ? 'dead' : ''} ${player.id === me.id ? 'self' : ''}`} onClick={() => player.alive && player.id !== me.id && setSelected(player.id)} disabled={!player.alive}><div className="avatar">{player.name.slice(0, 2).toUpperCase()}{player.alive && <span className="status-dot" />}</div><div className="player-info"><strong>{player.name}</strong><span>{player.id === me.id ? 'That’s you' : player.alive ? 'In the village' : 'Lost to the night'}</span></div>{phase === 'day' && player.alive && state.voteCounts[player.id] > 0 && <span className="vote-count">{state.voteCounts[player.id]} vote{state.voteCounts[player.id] === 1 ? '' : 's'}</span>}{player.id === me.id ? <span className="you-label">YOU</span> : !player.alive ? <Skull size={16} className="skull" /> : <span className="target-mark">{selected === player.id ? 'TARGET' : ''}</span>}</button>)}
+          {isDead && (
+            <div className="spectator-banner">
+              <Skull size={19} />
+              <div>
+                <span className="section-label">{canHunterAct ? 'FINAL MOMENT' : 'YOU ARE OUT'}</span>
+                <strong>{canHunterAct ? 'The Hunter gets one final shot.' : deathCause === 'voted' ? 'The village voted against you.' : 'The night claimed you.'}</strong>
+                <p>{canHunterAct ? 'Choose one living player before you leave the village.' : 'You can watch the village, but your actions are locked.'}</p>
+              </div>
+            </div>
+          )}
+
+          {isLobby && (
+            <div className="lobby-banner">
+              <span className="winner-sigil">L</span>
+              <div>
+                <span className="section-label">WAITING ROOM</span>
+                <strong>{isHost ? 'You are the host.' : 'Waiting for the host to start.'}</strong>
+                <p>{isHost ? `Ready up the village: ${readyCount}/${humans.length} players ready.` : `The host is waiting for the full room: ${readyCount}/${humans.length} ready.`}</p>
+              </div>
+            </div>
+          )}
+
+          {state.winner && (
+            <div className="winner-banner">
+              <span className="winner-sigil">{state.winner === 'village' ? 'V' : 'W'}</span>
+              <div>
+                <span className="section-label">GAME OVER</span>
+                <strong>{state.winner === 'village' ? 'The village survives.' : 'The werewolves take the village.'}</strong>
+              </div>
+              {isHost && <button className="rematch-btn" onClick={() => socket.emit('game:reset')}>Play again</button>}
+            </div>
+          )}
+
+          <div className="feedback-strip">
+            <div className="feedback-chip"><Sparkles size={14} /><span>{me.alive ? 'Alive' : 'Eliminated'}</span></div>
+            <div className="feedback-chip"><Users size={14} /><span>{livingCount} active players</span></div>
+            <div className="feedback-chip"><AlertTriangle size={14} /><span>{state.myVote ? 'Vote locked' : isDay ? 'Vote pending' : 'Night focus'}</span></div>
           </div>
 
-          {phase === 'day' && !state.winner && <div className="action-panel vote-panel"><div className="action-head"><div><span className="section-label">DAY VOTE</span><h3>{state.myVote ? 'Vote submitted' : `Accuse ${selectedPlayer?.name ?? 'a player'}`}</h3></div><div className="action-badge"><Users size={15} /> PUBLIC</div></div><div className="vote-progress"><div className="vote-progress-label"><span>{voteTotal} of {livingCount} votes cast</span><span>{voteTotal === livingCount ? 'Resolving...' : 'Waiting for the village'}</span></div><div className="vote-progress-track"><span style={{ width: `${livingCount ? (voteTotal / livingCount) * 100 : 0}%` }} /></div></div><p className="action-copy">Choose who you believe is a werewolf. Your vote is visible to the village.</p><button className="primary-btn" disabled={isDead || !selectedPlayer || !!state.myVote} onClick={submitVote}><Users size={17} /> {isDead ? 'Spectating' : state.myVote ? `Voted for ${state.players.find((player) => player.id === state.myVote)?.name ?? 'a player'}` : 'Submit vote'}</button></div>}
+          <div className="board-heading">
+            <div>
+              <span className="eyebrow">LIVE VILLAGE</span>
+              <h2>Who is still standing?</h2>
+            </div>
+            <div className="player-count"><Users size={16} /> <strong>{livingCount}</strong> alive <span>/</span> {state.players.length} total</div>
+          </div>
 
-          {!isLobby && <div className="action-panel"><div className="action-head"><div><span className="section-label">{me.role.toUpperCase()} ACTION</span><h3>{canHunterAct ? 'Choose your final shot' : isDead ? 'No actions available' : me.role === 'Werewolf' || me.role === 'Doctor' ? (state.myNightAction ? 'Night action submitted' : `Choose ${me.role === 'Werewolf' ? 'a victim' : 'someone to protect'}`) : inspectedRole ? 'Vision received' : `Inspect ${selectedPlayer?.name ?? 'a player'}`}</h3></div><div className="action-badge"><Eye size={15} /> SECRET</div></div>{canHunterAct ? <><p className="action-copy">You were eliminated, but the Hunter gets one final shot before leaving the village.</p><button className="primary-btn" disabled={!selectedPlayer} onClick={inspect}><Eye size={17} /> Fire at {selectedPlayer?.name ?? 'a player'}</button></> : isDead ? <p className="action-copy">Your role has been revealed to you, but you can no longer affect the living village.</p> : me.role === 'Werewolf' || me.role === 'Doctor' ? <><p className="action-copy">{state.myNightAction ? 'Your hidden choice has been received by the game master.' : 'Choose one living player. Your role action is private.'}</p><button className="primary-btn" disabled={phase !== 'night' || !selectedPlayer || !!state.myNightAction} onClick={inspect}><Eye size={17} /> {state.myNightAction ? 'Action submitted' : me.role === 'Werewolf' ? 'Choose victim' : 'Protect player'}</button></> : inspectedRole ? <div className="vision-result"><div className="vision-sigil">{inspectedRole === 'Werewolf' ? 'W' : 'V'}</div><div><strong>{selectedPlayer?.name}</strong><p>This player is a <b>{inspectedRole}</b>.</p></div><button className="reset-action" onClick={() => setSelected('')}>Inspect again</button></div> : <><p className="action-copy">Select one living player to reveal their role. The village will not be notified.</p><button className="primary-btn" disabled={me.role !== 'Seer' || phase !== 'night' || !selectedPlayer} onClick={inspect}><Eye size={17} /> Reveal {selectedPlayer ? selectedPlayer.name + "'s role" : 'a player'}</button></>}</div>}
-          <div className="log-row"><ScrollText size={16} /><span><b>Game log</b> · Night {String(state.night).padStart(2, '0')} began</span><ChevronRight size={15} /></div>
+          <div className="roster">
+            {state.players.map((player) => {
+              const isPlayerReady = state.readyIds.includes(player.id)
+              const watched = Boolean(state.wolfWatchedIds?.includes(player.id))
+              return (
+                <button
+                  key={player.id}
+                  className={`player-tile ${selected === player.id ? 'selected' : ''} ${!player.alive ? 'dead' : ''} ${player.id === me.id ? 'self' : ''}`}
+                  onClick={() => player.alive && player.id !== me.id && setSelected(player.id)}
+                  disabled={!player.alive}
+                >
+                  <div className="avatar">{player.name.slice(0, 2).toUpperCase()}{player.alive && <span className="status-dot" />}</div>
+                  <div className="player-info">
+                    <strong>{player.name}</strong>
+                    <span>{player.id === me.id ? 'That is you' : player.alive ? (isLobby ? (isPlayerReady ? 'Ready to play' : 'Waiting in lobby') : 'In the village') : 'Lost to the night'}</span>
+                  </div>
+                  {isLobby && <span className={`ready-pill ${isPlayerReady ? 'ready' : 'waiting'}`}>{isPlayerReady ? 'READY' : 'WAITING'}</span>}
+                  {isDay && player.alive && state.voteCounts[player.id] > 0 && <span className="vote-count">{state.voteCounts[player.id]} vote{state.voteCounts[player.id] === 1 ? '' : 's'}</span>}
+                  {watched && <span className="eye-pill"><Eye size={11} /> WATCHED</span>}
+                  {player.id === me.id ? <span className="you-label">YOU</span> : !player.alive ? <Skull size={16} className="skull" /> : <span className="target-mark">{selected === player.id ? 'TARGET' : ''}</span>}
+                </button>
+              )
+            })}
+          </div>
+
+          {isDay && !state.winner && (
+            <div className="action-panel vote-panel">
+              <div className="action-head">
+                <div>
+                  <span className="section-label">DAY VOTE</span>
+                  <h3>{state.myVote ? 'Vote submitted' : `Accuse ${selectedPlayer?.name ?? 'a player'}`}</h3>
+                </div>
+                <div className="action-badge"><Users size={15} /> PUBLIC</div>
+              </div>
+              <div className="vote-progress">
+                <div className="vote-progress-label">
+                  <span>{voteTotal} of {livingCount} votes cast</span>
+                  <span>{voteTotal === livingCount ? 'Resolving...' : 'Waiting for the village'}</span>
+                </div>
+                <div className="vote-progress-track">
+                  <span style={{ width: `${livingCount ? (voteTotal / livingCount) * 100 : 0}%` }} />
+                </div>
+              </div>
+              <p className="action-copy">Choose who you believe is a werewolf. Your vote is visible to the village.</p>
+              <button className="primary-btn" disabled={isDead || !selectedPlayer || !!state.myVote} onClick={submitVote}>
+                <Users size={17} />
+                {isDead ? 'Spectating' : state.myVote ? `Voted for ${state.players.find((player) => player.id === state.myVote)?.name ?? 'a player'}` : 'Submit vote'}
+              </button>
+            </div>
+          )}
+
+          {!isLobby && (
+            <div className="action-panel">
+              <div className="action-head">
+                <div>
+                  <span className="section-label">{me.role.toUpperCase()} ACTION</span>
+                  <h3>{actionTitle}</h3>
+                </div>
+                <div className="action-badge"><Eye size={15} /> SECRET</div>
+              </div>
+              {renderRoleActionContent()}
+            </div>
+          )}
+
+          <div className="event-log-panel">
+            <div className="log-row">
+              <ScrollText size={16} />
+              <span><b>Game log</b> · Night {String(state.night).padStart(2, '0')}</span>
+              <ChevronRight size={15} />
+            </div>
+            <ul>
+              {recentSystemEvents.map((event, index) => (
+                <li key={`${event.time}-${index}`}>
+                  <span>{event.time}</span>
+                  <p>{event.text}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
         </section>
 
-        <aside className="chat-panel"><div className="chat-head"><div><span className="section-label">VILLAGE CHAT</span><h2>Town square <span className="online-count">{state.players.length} online</span></h2></div><button className="icon-btn"><Mic size={17} /></button></div><div className="chat-messages">{state.messages.map((message, index) => <div className={`message ${message.system ? 'system-message' : ''}`} key={`${message.time}-${index}`}><div className="message-meta"><strong>{message.name}</strong><span>{message.time}</span></div><p>{message.text}</p></div>)}</div><div className="chat-compose"><input value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && sendMessage()} placeholder="Say something to the village..." /><button onClick={sendMessage} aria-label="Send message"><Send size={17} /></button></div><div className="chat-foot"><DoorOpen size={14} /> Room is invite-only <span>·</span> <button onClick={copyRoom}>Invite players</button></div></aside>
+        <aside className="chat-panel">
+          <div className="chat-head">
+            <div>
+              <span className="section-label">VILLAGE CHAT</span>
+              <h2>Town square <span className="online-count">{state.players.length} online</span></h2>
+            </div>
+            <button className="icon-btn"><Mic size={17} /></button>
+          </div>
+
+          <div className="chat-messages">
+            {state.messages.map((message, index) => (
+              <div className={`message ${message.system ? 'system-message' : ''}`} key={`${message.time}-${index}`}>
+                <div className="message-meta"><strong>{message.name}</strong><span>{message.time}</span></div>
+                <p>{message.text}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="chat-compose">
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => event.key === 'Enter' && sendMessage()}
+              placeholder="Say something to the village..."
+            />
+            <button onClick={sendMessage} aria-label="Send message"><Send size={17} /></button>
+          </div>
+
+          <div className="chat-foot">
+            <DoorOpen size={14} /> Room is invite-only <span>·</span> <button onClick={copyRoom}>Invite players</button>
+          </div>
+
+          {state.wolfChatVisible && (
+            <div className="wolf-chat-box">
+              <div className="chat-head">
+                <div>
+                  <span className="section-label">WOLF CHAT</span>
+                  <h2>Pack whisper <span className="online-count">{state.wolfChatMessages?.length ?? 0} messages</span></h2>
+                </div>
+                <Eye size={17} />
+              </div>
+
+              <div className="chat-messages compact">
+                {(state.wolfChatMessages ?? []).map((message, index) => (
+                  <div className="message system-message" key={`${message.time}-wolf-${index}`}>
+                    <div className="message-meta"><strong>{message.name}</strong><span>{message.time}</span></div>
+                    <p>{message.text}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="chat-compose">
+                <input
+                  value={wolfDraft}
+                  onChange={(event) => setWolfDraft(event.target.value)}
+                  onKeyDown={(event) => event.key === 'Enter' && sendWolfMessage()}
+                  placeholder="Send a wolf-only message..."
+                />
+                <button onClick={sendWolfMessage} aria-label="Send wolf-only message"><Send size={17} /></button>
+              </div>
+            </div>
+          )}
+        </aside>
       </section>
-      <footer className="footer"><span>Millers Hollow Online</span><span>Room host: <b>{isHost ? 'You' : 'Another player'}</b></span><span className={`connection ${connected ? '' : 'offline'}`}><span className="live-dot" /> {connected ? 'Connected' : 'Offline'}</span></footer>
+
+      {!isLobby && (
+        <>
+          <button className="mobile-action-toggle" onClick={() => setMobileActionsOpen((open) => !open)}>
+            <Shield size={16} />
+            {mobileActionsOpen ? 'Close Actions' : 'Open Actions'}
+          </button>
+          <div className={`mobile-action-drawer ${mobileActionsOpen ? 'open' : ''}`}>
+            <div className="mobile-action-head">
+              <strong>{me.role} Action</strong>
+              <button onClick={() => setMobileActionsOpen(false)}>Close</button>
+            </div>
+            <p className="mobile-action-subtitle">{actionTitle}</p>
+            <div className="mobile-action-content">{renderRoleActionContent()}</div>
+          </div>
+        </>
+      )}
+
+      <footer className="footer">
+        <span>Millers Hollow Online</span>
+        <span>Room host: <b>{isHost ? 'You' : 'Another player'}</b></span>
+        <span className={`connection ${connected ? '' : 'offline'}`}><span className="live-dot" /> {connected ? 'Connected' : 'Offline'}</span>
+      </footer>
     </main>
   )
 }
