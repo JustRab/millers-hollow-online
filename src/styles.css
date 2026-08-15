@@ -1110,8 +1110,13 @@ button {
     padding: 0 17px;
   }
 
-  .footer > span:nth-child(2) {
-    display: none;
+  .footer {
+    height: auto;
+    min-height: 46px;
+    flex-wrap: wrap;
+    gap: 5px 12px;
+    padding-top: 9px;
+    padding-bottom: 9px;
   }
 }
 /* --- Accessibility and contrast fixes for host controls and related overlays --- */
@@ -1399,6 +1404,36 @@ button {
   display: grid;
   gap: 26px;
   padding: 24px 26px;
+}
+
+.summary-winner {
+  display: grid;
+  gap: 6px;
+  padding: 15px 16px;
+  border: 1px solid #80613d;
+  background: #2a2017;
+}
+
+.summary-winner strong {
+  font: 600 21px "Playfair Display", serif;
+}
+
+.village-winner {
+  border-color: #71955a;
+  background: #243022;
+}
+
+.village-winner strong {
+  color: #c8e5a9;
+}
+
+.wolf-winner {
+  border-color: #9b5147;
+  background: #34201f;
+}
+
+.wolf-winner strong {
+  color: #efb0a2;
 }
 
 .summary-section {

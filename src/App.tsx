@@ -105,7 +105,18 @@ type SoundCue =
   | "tie"
   | "success"
   | "danger"
-  | "info";
+  | "info"
+  | "count";
+
+function displayRoleName(role: string | undefined): string {
+  if (!role) return "Unknown";
+  if (role === "GirlOfTheNight") return "Girl of the Night";
+  return role;
+}
+
+function displayAnnouncement(text: string): string {
+  return text.replaceAll("GirlOfTheNight", "Girl of the Night");
+}
 
 const socket: Socket = io();
 let sharedAudioContext: AudioContext | null = null;
@@ -148,6 +159,7 @@ function playUiSound(kind: SoundCue, enabled: boolean) {
     },
     danger: { notes: [165, 123, 92], type: "sawtooth", gap: 0.14, length: 0.3 },
     info: { notes: [330], type: "sine", gap: 0, length: 0.18 },
+    count: { notes: [520], type: "triangle", gap: 0, length: 0.06 },
   };
 
   const pattern = patterns[kind];
@@ -335,6 +347,7 @@ function App() {
   const [showSummary, setShowSummary] = useState(false);
 
   const seenEvent = useRef(0);
+  const lastRevealVoteTotal = useRef(0);
   const wasAlive = useRef<boolean | null>(null);
   const villageChatEndRef = useRef<HTMLDivElement | null>(null);
   const wolfChatEndRef = useRef<HTMLDivElement | null>(null);
@@ -602,6 +615,23 @@ function App() {
     return [...nights, ...votes].sort((a, b) => a.order - b.order);
   }, [state?.nightHistory, state?.voteHistory]);
 
+  useEffect(() => {
+    if (!voteRevealActive) {
+      lastRevealVoteTotal.current = 0;
+      return;
+    }
+    if (voteTotal > lastRevealVoteTotal.current) {
+      const increments = voteTotal - lastRevealVoteTotal.current;
+      for (let increment = 0; increment < increments; increment += 1) {
+        window.setTimeout(
+          () => playUiSound("count", audioEnabled),
+          increment * 70,
+        );
+      }
+      lastRevealVoteTotal.current = voteTotal;
+    }
+  }, [audioEnabled, voteRevealActive, voteTotal]);
+
   const helperHints = useMemo(() => {
     if (!meOrNull || !meOrNull.alive) {
       return canHunterAct
@@ -844,7 +874,7 @@ function App() {
                     : `Inspect ${selectedPlayer?.name ?? "a player"}`;
 
   const roleAssigned = !isLobby;
-  const roleNameDisplay = roleAssigned ? me.role : "Hidden";
+  const roleNameDisplay = roleAssigned ? displayRoleName(me.role) : "Hidden";
   const roleSummaryDisplay = roleAssigned
     ? roleSummary(me.role)
     : "Your role is not assigned yet. Roles are secretly distributed when the match starts.";
@@ -1097,7 +1127,7 @@ function App() {
             </span>
             <div>
               <strong>{notice.title}</strong>
-              <span>{notice.detail}</span>
+              <span>{displayAnnouncement(notice.detail)}</span>
             </div>
             <button
               onClick={() => setNotice(null)}
@@ -1421,7 +1451,7 @@ function App() {
                     : "The werewolves take the village."}
                 </strong>
                 {state.lastEvent?.detail && (
-                  <p className="winner-detail">{state.lastEvent.detail}</p>
+                  <p className="winner-detail">{displayAnnouncement(state.lastEvent.detail)}</p>
                 )}
               </div>
               {isHost && (
@@ -1455,6 +1485,13 @@ function App() {
                 </div>
 
                 <div className="summary-content">
+                  <div className={`summary-winner ${state.winner === "village" ? "village-winner" : "wolf-winner"}`}>
+                    <span className="section-label">WINNING FACTION</span>
+                    <strong>
+                      {state.winner === "village" ? "The Village" : "The Werewolves"}
+                    </strong>
+                  </div>
+
                   {summaryTimeline.length > 0 && (
                     <div className="summary-section">
                       <h3>
@@ -1485,7 +1522,7 @@ function App() {
                               <div className="summary-event-marker"><Users size={15} /></div>
                               <div className="summary-event-body">
                                 <span className="summary-event-label">Day {String(event.vote.phase).padStart(2, "0")} vote</span>
-                                <p><Skull size={14} /> {event.vote.votedOut.name} ({event.vote.votedOut.role}) was eliminated.</p>
+                                <p><Skull size={14} /> {event.vote.votedOut.name} ({displayRoleName(event.vote.votedOut.role)}) was eliminated.</p>
                                 <div className="summary-vote-list">
                                   {Object.entries(event.vote.votes).map(([voter, target]) => (
                                     <span key={`${voter}-${target}`}>
@@ -1514,9 +1551,9 @@ function App() {
                               className={`reveal-role ${player.alive ? "alive" : "dead"}`}
                             >
                               {meOrNull && meOrNull.id === player.id
-                                ? `You (${meOrNull.role})`
+                                ? `You (${displayRoleName(meOrNull.role)})`
                                 : state.winner && player.role
-                                  ? player.role
+                                  ? displayRoleName(player.role)
                                   : player.alive
                                     ? "Survived"
                                     : "Eliminated"}
@@ -1612,11 +1649,10 @@ function App() {
               const votedFor = state.myVote === player.id;
               const hasVoted = isDay && state.votedIds.includes(player.id);
               const liveVoteCount = displayedVoteCounts[player.id] ?? 0;
-              const hasVotes = isDay && liveVoteCount > 0;
+              const hasVotes = voteRevealActive && liveVoteCount > 0;
               const hasFinalVoteCount =
                 voteRevealActive && state.voteCounts[player.id] > 0;
-              const showVoteCount =
-                isDay && (liveVoteCount > 0 || hasFinalVoteCount);
+              const showVoteCount = voteRevealActive && isDay;
               const watched = Boolean(
                 state.wolfWatchedIds?.includes(player.id),
               );
@@ -1660,7 +1696,7 @@ function App() {
                               ? "Ready to play"
                               : "Waiting in lobby"
                             : "In the village"
-                          : `Eliminated (${player.role ?? "Unknown"})`}
+                          : `Eliminated (${displayRoleName(player.role)})`}
                     </span>
                   </div>
                   {isLobby && (
@@ -1710,25 +1746,21 @@ function App() {
                   <Users size={15} /> PUBLIC
                 </div>
               </div>
-              <div className="vote-progress">
-                <div className="vote-progress-label">
-                  <span>
-                    {voteTotal} of {livingCount} votes cast
-                  </span>
-                  <span>
-                    {voteTotal === livingCount
-                      ? "Resolving..."
-                      : "Waiting for the village"}
-                  </span>
+              {voteRevealActive && (
+                <div className="vote-progress">
+                  <div className="vote-progress-label">
+                    <span>{voteTotal} votes counted</span>
+                    <span>Final tally</span>
+                  </div>
+                  <div className="vote-progress-track">
+                    <span
+                      style={{
+                        width: `${livingCount ? (voteTotal / livingCount) * 100 : 0}%`,
+                      }}
+                    />
+                  </div>
                 </div>
-                <div className="vote-progress-track">
-                  <span
-                    style={{
-                      width: `${livingCount ? (voteTotal / livingCount) * 100 : 0}%`,
-                    }}
-                  />
-                </div>
-              </div>
+              )}
               {voteRevealActive && (
                 <div className="vote-reveal-banner" role="status">
                   <Sparkles size={15} /> Final vote count is being revealed
@@ -1815,7 +1847,7 @@ function App() {
                   <strong>{message.name}</strong>
                   <span>{message.time}</span>
                 </div>
-                <p>{message.text}</p>
+                        <p>{displayAnnouncement(message.text)}</p>
               </div>
             ))}
             <div ref={villageChatEndRef} />
@@ -1866,7 +1898,7 @@ function App() {
                       </strong>
                       <span>{message.time}</span>
                     </div>
-                    <p>{message.text}</p>
+                    <p>{displayAnnouncement(message.text)}</p>
                   </div>
                 ))}
                 <div ref={wolfChatEndRef} />
@@ -1919,6 +1951,7 @@ function App() {
 
       <footer className="footer">
         <span>Millers Hollow Online</span>
+        <span>Coded and Designed by Iván Licea.</span>
         <span>
           Room host: <b>{isHost ? "You" : "Another player"}</b>
         </span>
