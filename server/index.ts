@@ -412,7 +412,9 @@ function publicPlayers(room: RoomState) {
 
 function voteCounts(room: RoomState) {
   const tally = new Map<string, number>();
-  for (const targetId of room.votes.values()) {
+  for (const [voterId, targetId] of room.votes.entries()) {
+    const voter = room.players.find((player) => player.id === voterId);
+    if (!voter || voter.role === "GirlOfTheNight") continue;
     tally.set(targetId, (tally.get(targetId) ?? 0) + 1);
   }
   return Object.fromEntries(tally);
@@ -480,7 +482,9 @@ function emitState(roomCode: string) {
       me?.role === "Werewolf" &&
       room.girlPeekActive &&
       Date.now() - room.girlPeekStartedAt >= 3_000
-      ? aliveWolves(room).map((player) => player.id)
+      ? room.girlOfTheNightId
+        ? [room.girlOfTheNightId]
+        : []
       : [];
 
     const tutorialHint =
@@ -698,6 +702,26 @@ function resolveExpiredPhases() {
     if (room.phase === "night") {
       resolveNight(roomCode);
     } else {
+      const alivePlayers = room.players.filter((player) => player.alive);
+      const connectedAlive = alivePlayers.filter((player) =>
+        io.sockets.sockets.has(player.id),
+      );
+
+      if (
+        alivePlayers.length <= 5 &&
+        connectedAlive.some((player) => !room.votes.has(player.id))
+      ) {
+        room.phaseEndsAt = Date.now() + 20_000;
+        setLastEvent(
+          room,
+          "Endgame vote required",
+          "All living players must cast a vote before night can begin.",
+          "info",
+        );
+        emitState(roomCode);
+        continue;
+      }
+
       room.votes.clear();
       room.phase = "night";
       room.night += 1;
@@ -1213,6 +1237,10 @@ io.on("connection", (socket) => {
     }
 
     if (actor.role === "Maid") {
+      if (room.nightActions.has(actor.id)) {
+        socket.emit("game:error", "The Maid can only swap once each night.");
+        return;
+      }
       const originalRole = actor.role;
       actor.role = target.role;
       target.role = originalRole;
@@ -1277,18 +1305,6 @@ io.on("connection", (socket) => {
     room.girlPeekStartedAt = Date.now();
     room.girlPeekExpiresAt = Date.now() + 6_000;
     room.girlOfTheNightId = girl.id;
-    addRoomMessage(room, {
-      name: "System",
-      text: `${girl.name} peered into the wolves' whispers.`,
-      time: now(),
-      system: true,
-    });
-    setLastEvent(
-      room,
-      "A hidden gaze",
-      "The wolves only see the eye icon if the peek lasts at least 3 seconds.",
-      "info",
-    );
     emitState(roomCode);
   });
 
@@ -1392,15 +1408,6 @@ io.on("connection", (socket) => {
     )
       return;
 
-    const alivePlayers = room.players.filter((player) => player.alive);
-    if (alivePlayers.length <= 5) {
-      socket.emit(
-        "game:error",
-        "Voting out players is only enabled when more than 5 players are alive.",
-      );
-      return;
-    }
-
     for (const [voterId, votedId] of [...room.votes.entries()]) {
       const voterAlive = room.players.find((player) => player.id === voterId)?.alive;
       const targetAlive = room.players.find((player) => player.id === votedId)?.alive;
@@ -1421,7 +1428,9 @@ io.on("connection", (socket) => {
       connectedAlive.every((player) => room.votes.has(player.id))
     ) {
       const totals = new Map<string, number>();
-      for (const votedId of room.votes.values()) {
+      for (const [voterId, votedId] of room.votes.entries()) {
+        const voter = room.players.find((player) => player.id === voterId);
+        if (!voter || voter.role === "GirlOfTheNight") continue;
         totals.set(votedId, (totals.get(votedId) ?? 0) + 1);
       }
 
@@ -1538,9 +1547,15 @@ io.on("connection", (socket) => {
     )
       return;
 
+    if (room.nightActions.get(seer.id) === `seer:${room.night}`) {
+      socket.emit("game:error", "The Seer can inspect only once per night.");
+      return;
+    }
+
     const seen = room.inspections.get(seer.id) ?? new Map<string, Role>();
     seen.set(target.id, target.role);
     room.inspections.set(seer.id, seen);
+    room.nightActions.set(seer.id, `seer:${room.night}`);
 
     socket.emit("game:action-confirmed", {
       title: "Vision received",

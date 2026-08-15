@@ -478,7 +478,6 @@ function App() {
     : 0;
   const livingCount =
     state?.players.filter((player) => player.alive).length ?? 0;
-  const votingEnabled = livingCount > 5;
   const phaseProgress = state?.phaseEndsAt
     ? Math.max(
         0,
@@ -561,9 +560,7 @@ function App() {
     return [
       state?.myVote
         ? "Your vote is locked."
-        : votingEnabled
-          ? "Submit your vote before phase end."
-          : "Voting is disabled at 5 or fewer players.",
+        : "Submit your vote before phase end.",
       "Track who pushes fast accusations and late vote swings.",
     ];
   }, [
@@ -574,7 +571,6 @@ function App() {
     isReady,
     isHost,
     state?.myVote,
-    votingEnabled,
   ]);
 
   if (!state || !state.me) {
@@ -862,10 +858,10 @@ function App() {
             isDead ||
             (me.role !== "Cupid" && !selectedPlayer) ||
             (me.role === "Cupid" && cupidTargets.length !== 2) ||
-            (me.role === "Seer" && !isNight) ||
+            (me.role === "Seer" && (!isNight || !!state.myNightAction)) ||
             ((me.role === "Werewolf" || me.role === "Doctor") &&
               !isNight) ||
-            (me.role === "Maid" && !isNight) ||
+            (me.role === "Maid" && (!isNight || !!state.myNightAction)) ||
             (me.role === "Cupid" && !isNight) ||
             !["Seer", "Werewolf", "Doctor", "Maid", "Cupid"].includes(me.role)
           }
@@ -1382,9 +1378,6 @@ function App() {
                     <div className="roles-grid">
                       {state.players.map((player) => (
                         <div key={player.id} className="role-reveal">
-                          <div className="reveal-avatar">
-                            {player.name.slice(0, 2).toUpperCase()}
-                          </div>
                           <div className="reveal-info">
                             <strong>{player.name}</strong>
                             <span
@@ -1492,7 +1485,7 @@ function App() {
               return (
                 <button
                   key={player.id}
-                  className={`player-tile ${selected === player.id ? "selected" : ""} ${!player.alive ? "dead" : ""} ${player.id === me.id ? "self" : ""}`}
+                  className={`player-tile ${selected === player.id ? "selected" : ""} ${!player.alive ? "dead" : ""} ${player.id === me.id ? "self" : ""} ${watched ? "watched" : ""}`}
                   onClick={() => {
                     if (!player.alive || player.id === me.id) return;
 
@@ -1544,11 +1537,6 @@ function App() {
                       {state.voteCounts[player.id] === 1 ? "" : "s"}
                     </span>
                   )}
-                  {watched && (
-                    <span className="eye-pill">
-                      <Eye size={11} /> WATCHED
-                    </span>
-                  )}
                   {player.id === me.id ? (
                     <span className="you-label">YOU</span>
                   ) : me.role === "Cupid" && cupidTargets.includes(player.id) ? (
@@ -1570,13 +1558,7 @@ function App() {
               <div className="action-head">
                 <div>
                   <span className="section-label">DAY VOTE</span>
-                  <h3>
-                    {!votingEnabled
-                      ? "Voting disabled in endgame"
-                      : state.myVote
-                      ? "Vote submitted"
-                      : `Accuse ${selectedPlayer?.name ?? "a player"}`}
-                  </h3>
+                  <h3>{state.myVote ? "Vote submitted" : `Accuse ${selectedPlayer?.name ?? "a player"}`}</h3>
                 </div>
                 <div className="action-badge">
                   <Users size={15} /> PUBLIC
@@ -1602,22 +1584,18 @@ function App() {
                 </div>
               </div>
               <p className="action-copy">
-                {votingEnabled
-                  ? "Choose who you believe is a werewolf. Your vote is visible to the village."
-                  : "With 5 or fewer players alive, vote eliminations are disabled."}
+                {livingCount <= 5
+                  ? "Endgame rule: every remaining player must vote before night can begin."
+                  : "Early game: voting is optional, and the day can end without a full vote."}
               </p>
               <button
                 className="primary-btn"
-                disabled={
-                  isDead || !selectedPlayer || !!state.myVote || !votingEnabled
-                }
+                disabled={isDead || !selectedPlayer || !!state.myVote}
                 onClick={submitVote}
               >
                 <Users size={17} />
                 {isDead
                   ? "Spectating"
-                  : !votingEnabled
-                    ? "Voting disabled (5 or fewer alive)"
                   : state.myVote
                     ? `Voted for ${state.players.find((player) => player.id === state.myVote)?.name ?? "a player"}`
                     : "Submit vote"}

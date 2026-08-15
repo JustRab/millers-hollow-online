@@ -405,6 +405,11 @@ button {
   border-color: #5c714e;
 }
 
+.player-tile.watched {
+  border-color: #c7924c;
+  box-shadow: 0 0 0 1px rgba(199, 146, 76, 0.45);
+}
+
 .player-tile:disabled {
   cursor: default;
 }
