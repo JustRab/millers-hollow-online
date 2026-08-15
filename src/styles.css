@@ -1073,6 +1073,34 @@ button {
   color: #f0e4d4;
 }
 
+.summary-header button {
+  border: 1px solid #7f6340;
+  background: #271c13;
+  color: #f0be78;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 2px;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.summary-header button:hover {
+  background: #322315;
+  border-color: #b28752;
+}
+
+.summary-footer .secondary-btn {
+  border: 1px solid #6f583c;
+  background: #261c14;
+  color: #efddb9;
+}
+
+.summary-footer .secondary-btn:hover:not(:disabled) {
+  background: #302216;
+  border-color: #ab8250;
+}
+
 .summary-header,
 .summary-footer {
   border-color: rgba(211, 167, 101, 0.24);
