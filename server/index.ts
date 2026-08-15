@@ -83,6 +83,8 @@ type RoomState = {
   winner: "village" | "werewolves" | null;
   phaseEndsAt: number;
   pendingHunterId: string | null;
+  pendingDoctorTargetId: string | null;
+  pendingDoctorSource: "night" | "vote" | null;
   eventId: number;
   lastEvent: GameEvent | null;
   messages: Message[];
@@ -149,6 +151,8 @@ function createRoomState(): RoomState {
     winner: null,
     phaseEndsAt: 0,
     pendingHunterId: null,
+    pendingDoctorTargetId: null,
+    pendingDoctorSource: null,
     eventId: 0,
     lastEvent: null,
     messages: [
@@ -190,6 +194,8 @@ function cloneRoom(room: RoomState): RoomState {
     ),
     votes: new Map(room.votes),
     nightActions: new Map(room.nightActions),
+    pendingDoctorTargetId: room.pendingDoctorTargetId,
+    pendingDoctorSource: room.pendingDoctorSource,
     readyPlayers: new Set(room.readyPlayers),
     wolfChatMessages: room.wolfChatMessages.map((message) => ({ ...message })),
     girlPeekStartedAt: room.girlPeekStartedAt,
@@ -303,7 +309,7 @@ function assignRoles(room: RoomState) {
     while (roles.length < total) roles.push("Villager");
   } else if (room.rolePreset === "chaos") {
     // Chaos: all roles, aggressive distribution
-    const wolfCount = Math.max(1, Math.floor(total / 3));
+    const wolfCount = Math.max(1, Math.floor(total / 5));
     for (let i = 0; i < wolfCount; i++) roles.push("Werewolf");
     if (total >= 3) roles.push("Seer");
     if (total >= 4) roles.push("Doctor");
@@ -315,7 +321,7 @@ function assignRoles(room: RoomState) {
     while (roles.length < total) roles.push("Villager");
   } else {
     // Classic: balanced distribution
-    const wolfCount = Math.max(1, Math.floor(total / 4));
+    const wolfCount = Math.max(1, Math.floor(total / 5));
     for (let i = 0; i < wolfCount; i++) roles.push("Werewolf");
     if (total >= 3) roles.push("Seer");
     if (total >= 4) roles.push("Doctor");
@@ -433,6 +439,35 @@ function resolveWolfVictim(room: RoomState): string | undefined {
   return ranked[0]?.[0];
 }
 
+function collectWolfVotes(room: RoomState) {
+  const wolfVotes = new Map<string, string>();
+  for (const [actorId, targetId] of room.nightActions.entries()) {
+    const actor = room.players.find((p) => p.id === actorId);
+    if (actor?.role === "Werewolf") wolfVotes.set(actorId, targetId);
+  }
+  return wolfVotes;
+}
+
+function setDoctorPrompt(
+  room: RoomState,
+  targetId: string,
+  source: "night" | "vote",
+) {
+  room.pendingDoctorTargetId = targetId;
+  room.pendingDoctorSource = source;
+  room.phaseEndsAt = Date.now() + 20_000;
+
+  const target = room.players.find((player) => player.id === targetId);
+  setLastEvent(
+    room,
+    "Doctor decision",
+    target
+      ? `Doctor must choose whether to save ${target.name}.`
+      : "Doctor must choose whether to save the target.",
+    "info",
+  );
+}
+
 const httpServer = createServer((request, response) => {
   if (request.url === "/health") {
     response.writeHead(200, { "content-type": "application/json" });
@@ -498,6 +533,15 @@ function emitState(roomCode: string) {
       phase: room.phase,
       phaseEndsAt: room.phaseEndsAt,
       pendingHunterId: room.pendingHunterId,
+      pendingDoctorTargetId: room.pendingDoctorTargetId,
+      pendingDoctorSource: room.pendingDoctorSource,
+      doctorDecisionNeeded: Boolean(
+        me &&
+          me.role === "Doctor" &&
+          me.alive &&
+          room.pendingDoctorTargetId &&
+          !room.doctorUsedIds.has(me.id),
+      ),
       readyIds: [...room.readyPlayers],
       night: room.night,
       hostId: room.hostId,
@@ -534,87 +578,52 @@ function resolveNight(roomCode: string) {
     (player) => player.alive && player.role === "Doctor",
   );
   const victimId = resolveWolfVictim(room);
-  const doctorTargetId = doctor ? room.nightActions.get(doctor.id) : undefined;
-
-  const wolfVotes = new Map<string, string>();
-  for (const [actorId, targetId] of room.nightActions.entries()) {
-    const actor = room.players.find((p) => p.id === actorId);
-    if (actor?.role === "Werewolf") wolfVotes.set(actorId, targetId);
-  }
+  const wolfVotes = collectWolfVotes(room);
 
   const victim = victimId
     ? room.players.find((player) => player.id === victimId)
     : null;
 
   if (victim && victim.alive) {
-    const doctorCanSave =
-      doctor &&
-      doctorTargetId === victim.id &&
-      !room.doctorUsedIds.has(doctor.id);
+    const doctorCanDecide =
+      doctor && !room.doctorUsedIds.has(doctor.id) && room.pendingDoctorTargetId === null;
 
-    if (doctorCanSave && doctor) {
-      room.doctorUsedIds.add(doctor.id);
-      room.revealedRoleIds.add(doctor.id);
-      room.revealedRoleIds.add(victim.id);
+    if (doctorCanDecide) {
+      setDoctorPrompt(room, victim.id, "night");
+      emitState(roomCode);
+      return;
+    }
 
-      addRoomMessage(room, {
-        name: "System",
-        text: `The Doctor saved ${victim.name}. Doctor: ${doctor.name} (${doctor.role}). Saved player role: ${victim.role}.`,
-        time: now(),
-        system: true,
-      });
-      setLastEvent(
-        room,
-        "The Doctor revealed themself",
-        `${doctor.name} saved ${victim.name}. Roles revealed: Doctor and ${victim.role}.`,
-        "success",
-      );
+    victim.alive = false;
+    room.revealedRoleIds.add(victim.id);
 
-      room.nightHistory.push({
-        night: room.night,
-        victim: null,
-        protected: { id: victim.id, name: victim.name },
-        wolfVotes,
-      });
-    } else {
-      victim.alive = false;
-      room.revealedRoleIds.add(victim.id);
+    addRoomMessage(room, {
+      name: "System",
+      text: `${victim.name} did not survive the night. Role: ${victim.role}.`,
+      time: now(),
+      system: true,
+    });
+    setLastEvent(
+      room,
+      `${victim.name} died during the night`,
+      `The village wakes to a missing voice. Role: ${victim.role}.`,
+      "danger",
+    );
 
-      addRoomMessage(room, {
-        name: "System",
-        text: `${victim.name} did not survive the night. Role: ${victim.role}.`,
-        time: now(),
-        system: true,
-      });
-      setLastEvent(
-        room,
-        `${victim.name} died during the night`,
-        `The village wakes to a missing voice. Role: ${victim.role}.`,
-        "danger",
-      );
+    applyLoverLinkDeath(room, victim.id);
 
-      applyLoverLinkDeath(room, victim.id);
+    room.nightHistory.push({
+      night: room.night,
+      victim: { id: victim.id, name: victim.name, role: victim.role },
+      protected: null,
+      wolfVotes,
+    });
 
-      room.nightHistory.push({
-        night: room.night,
-        victim: { id: victim.id, name: victim.name, role: victim.role },
-        protected: doctorTargetId
-          ? {
-              id: doctorTargetId,
-              name:
-                room.players.find((player) => player.id === doctorTargetId)
-                  ?.name ?? "Unknown",
-            }
-          : null,
-        wolfVotes,
-      });
-
-      if (victim.role === "Hunter" && io.sockets.sockets.has(victim.id)) {
-        room.pendingHunterId = victim.id;
-        room.phaseEndsAt = Date.now() + 30_000;
-        emitState(roomCode);
-        return;
-      }
+    if (victim.role === "Hunter" && io.sockets.sockets.has(victim.id)) {
+      room.pendingHunterId = victim.id;
+      room.phaseEndsAt = Date.now() + 30_000;
+      emitState(roomCode);
+      return;
     }
   } else {
     addRoomMessage(room, {
@@ -632,27 +641,11 @@ function resolveNight(roomCode: string) {
     room.nightHistory.push({
       night: room.night,
       victim: null,
-      protected: doctorTargetId
-        ? {
-            id: doctorTargetId,
-            name:
-              room.players.find((player) => player.id === doctorTargetId)
-                ?.name ?? "Unknown",
-          }
-        : null,
+      protected: null,
       wolfVotes,
     });
   }
-
-  const preserveDoctorTarget =
-    doctor && doctorTargetId && !room.doctorUsedIds.has(doctor.id)
-      ? doctorTargetId
-      : null;
-
   room.nightActions.clear();
-  if (doctor && preserveDoctorTarget) {
-    room.nightActions.set(doctor.id, preserveDoctorTarget);
-  }
   room.wolfChatMessages = [];
   room.girlPeekActive = false;
   room.girlPeekExpiresAt = 0;
@@ -676,6 +669,119 @@ function resolveExpiredPhases() {
       room.girlPeekStartedAt = 0;
       emitState(roomCode);
       continue;
+    }
+
+    if (room.pendingDoctorTargetId) {
+      if (Date.now() < room.phaseEndsAt) continue;
+
+      const target = room.players.find(
+        (player) => player.id === room.pendingDoctorTargetId,
+      );
+
+      if (room.pendingDoctorSource === "night") {
+        const wolfVotes = collectWolfVotes(room);
+        if (target && target.alive) {
+          target.alive = false;
+          room.revealedRoleIds.add(target.id);
+          addRoomMessage(room, {
+            name: "System",
+            text: `${target.name} did not survive the night. Role: ${target.role}.`,
+            time: now(),
+            system: true,
+          });
+          setLastEvent(
+            room,
+            `${target.name} died during the night`,
+            `The Doctor did not save ${target.name}. Role: ${target.role}.`,
+            "danger",
+          );
+          applyLoverLinkDeath(room, target.id);
+          room.nightHistory.push({
+            night: room.night,
+            victim: { id: target.id, name: target.name, role: target.role },
+            protected: null,
+            wolfVotes,
+          });
+
+          if (target.role === "Hunter" && io.sockets.sockets.has(target.id)) {
+            room.pendingDoctorTargetId = null;
+            room.pendingDoctorSource = null;
+            room.pendingHunterId = target.id;
+            room.phaseEndsAt = Date.now() + 30_000;
+            emitState(roomCode);
+            continue;
+          }
+        } else {
+          room.nightHistory.push({
+            night: room.night,
+            victim: null,
+            protected: null,
+            wolfVotes,
+          });
+        }
+
+        room.pendingDoctorTargetId = null;
+        room.pendingDoctorSource = null;
+        room.nightActions.clear();
+        room.wolfChatMessages = [];
+        room.girlPeekActive = false;
+        room.girlPeekExpiresAt = 0;
+        room.girlPeekStartedAt = 0;
+
+        if (!checkWinner(room)) {
+          room.phase = "day";
+          room.phaseEndsAt = Date.now() + 180_000;
+        }
+        emitState(roomCode);
+        continue;
+      }
+
+      if (room.pendingDoctorSource === "vote") {
+        if (target && target.alive) {
+          target.alive = false;
+          room.revealedRoleIds.add(target.id);
+          addRoomMessage(room, {
+            name: "System",
+            text: `${target.name} was voted out by the village. Role: ${target.role}.`,
+            time: now(),
+            system: true,
+          });
+          setLastEvent(
+            room,
+            `${target.name} was voted out`,
+            `The Doctor did not save ${target.name}. Role: ${target.role}.`,
+            "danger",
+          );
+          applyLoverLinkDeath(room, target.id);
+
+          room.voteHistory.push({
+            phase: room.night,
+            votedOut: { id: target.id, name: target.name, role: target.role },
+            votes: new Map(room.votes),
+          });
+
+          if (target.role === "Hunter" && io.sockets.sockets.has(target.id)) {
+            room.pendingDoctorTargetId = null;
+            room.pendingDoctorSource = null;
+            room.pendingHunterId = target.id;
+            room.phaseEndsAt = Date.now() + 30_000;
+            room.votes.clear();
+            emitState(roomCode);
+            continue;
+          }
+        }
+
+        room.pendingDoctorTargetId = null;
+        room.pendingDoctorSource = null;
+        room.votes.clear();
+        if (!checkWinner(room)) {
+          room.phase = "night";
+          room.night += 1;
+          room.phaseEndsAt = Date.now() + 120_000;
+        }
+        emitState(roomCode);
+        continue;
+      }
     }
 
     if (room.winner || room.phase === "lobby" || Date.now() < room.phaseEndsAt)
@@ -951,6 +1057,8 @@ io.on("connection", (socket) => {
     assignRoles(room);
     room.winner = null;
     room.pendingHunterId = null;
+    room.pendingDoctorTargetId = null;
+    room.pendingDoctorSource = null;
     room.votes.clear();
     room.nightActions.clear();
     room.readyPlayers.clear();
@@ -997,8 +1105,12 @@ io.on("connection", (socket) => {
     room.phaseEndsAt = 0;
     room.winner = null;
     room.pendingHunterId = null;
+    room.pendingDoctorTargetId = null;
+    room.pendingDoctorSource = null;
     room.votes.clear();
     room.nightActions.clear();
+    room.pendingDoctorTargetId = null;
+    room.pendingDoctorSource = null;
     room.wolfChatMessages = [];
     room.girlPeekActive = false;
     room.girlPeekExpiresAt = 0;
@@ -1050,6 +1162,10 @@ io.on("connection", (socket) => {
       room.doctorUsedIds.delete(targetId);
       room.cupidUsedIds.delete(targetId);
       room.revealedRoleIds.delete(targetId);
+      if (room.pendingDoctorTargetId === targetId) {
+        room.pendingDoctorTargetId = null;
+        room.pendingDoctorSource = null;
+      }
       for (const [voterId, votedId] of [...room.votes.entries()]) {
         if (votedId === targetId) room.votes.delete(voterId);
       }
@@ -1085,6 +1201,8 @@ io.on("connection", (socket) => {
     assignRoles(room);
     room.winner = null;
     room.pendingHunterId = null;
+    room.pendingDoctorTargetId = null;
+    room.pendingDoctorSource = null;
     room.votes.clear();
     room.nightActions.clear();
     room.readyPlayers.clear();
@@ -1212,21 +1330,15 @@ io.on("connection", (socket) => {
     )
       return;
 
-    if (actor.role === "Werewolf" || actor.role === "Doctor") {
+    if (actor.role === "Werewolf") {
       room.nightActions.set(actor.id, target.id);
       socket.emit("game:action-confirmed", {
-        title:
-          actor.role === "Werewolf" ? "Victim selected" : "Save target selected",
-        detail:
-          actor.role === "Werewolf"
-            ? `${target.name} is your current target. You can still change it before night ends.`
-            : `${target.name} is your current save target. You can still change it before night ends.`,
+        title: "Victim selected",
+        detail: `${target.name} is your current target. You can still change it before night ends.`,
       });
 
       const requiredActors = room.players.filter(
-        (player) =>
-          player.alive &&
-          (player.role === "Werewolf" || player.role === "Doctor"),
+        (player) => player.alive && player.role === "Werewolf",
       );
       if (requiredActors.every((player) => room.nightActions.has(player.id))) {
         resolveNight(roomCode);
@@ -1273,20 +1385,20 @@ io.on("connection", (socket) => {
     room.nightActions.set(dog.id, alignment);
     addRoomMessage(room, {
       name: "System",
-      text: `${dog.name} made a silent choice of allegiance.`,
+      text: "A silent choice of allegiance was made in the dark.",
       time: now(),
       system: true,
     });
     setLastEvent(
       room,
       "The Dog chose a path",
-      `${dog.name} committed to a side.`,
+      "A hidden player shifted allegiance.",
       "info",
     );
     emitState(roomCode);
   });
 
-  socket.on("girl:peek", () => {
+  socket.on("girl:peek:start", () => {
     const roomCode = socket.data.room ?? DEFAULT_ROOM;
     const room = getRoom(roomCode);
     const girl = room.players.find((player) => player.id === socket.id);
@@ -1305,6 +1417,25 @@ io.on("connection", (socket) => {
     room.girlPeekStartedAt = Date.now();
     room.girlPeekExpiresAt = Date.now() + 6_000;
     room.girlOfTheNightId = girl.id;
+    emitState(roomCode);
+  });
+
+  socket.on("girl:peek:stop", () => {
+    const roomCode = socket.data.room ?? DEFAULT_ROOM;
+    const room = getRoom(roomCode);
+    const girl = room.players.find((player) => player.id === socket.id);
+    if (
+      !girl ||
+      girl.role !== "GirlOfTheNight" ||
+      room.phase !== "night" ||
+      room.winner
+    )
+      return;
+
+    room.girlPeekActive = false;
+    room.girlPeekExpiresAt = 0;
+    room.girlPeekStartedAt = 0;
+    room.girlOfTheNightId = null;
     emitState(roomCode);
   });
 
@@ -1446,27 +1577,15 @@ io.on("connection", (socket) => {
           const doctor = room.players.find(
             (player) => player.alive && player.role === "Doctor",
           );
-          const doctorCanSave =
+          const doctorCanDecide =
             doctor &&
             !room.doctorUsedIds.has(doctor.id) &&
-            room.nightActions.get(doctor.id) === eliminated.id;
+            room.pendingDoctorTargetId === null;
 
-          if (doctorCanSave && doctor) {
-            room.doctorUsedIds.add(doctor.id);
-            room.revealedRoleIds.add(doctor.id);
-            room.revealedRoleIds.add(eliminated.id);
-            addRoomMessage(room, {
-              name: "System",
-              text: `The village voted to eliminate ${eliminated.name}, but Doctor ${doctor.name} saved them. Roles revealed: Doctor and ${eliminated.role}.`,
-              time: now(),
-              system: true,
-            });
-            setLastEvent(
-              room,
-              "Vote save by Doctor",
-              `${doctor.name} saved ${eliminated.name}. Roles revealed: Doctor and ${eliminated.role}.`,
-              "success",
-            );
+          if (doctorCanDecide) {
+            setDoctorPrompt(room, eliminated.id, "vote");
+            emitState(roomCode);
+            return;
           } else {
             eliminated.alive = false;
             room.revealedRoleIds.add(eliminated.id);
@@ -1564,6 +1683,143 @@ io.on("connection", (socket) => {
     emitState(roomCode);
   });
 
+  socket.on("doctor:decide", (save: boolean) => {
+    const roomCode = socket.data.room ?? DEFAULT_ROOM;
+    const room = getRoom(roomCode);
+    const doctor = room.players.find((player) => player.id === socket.id);
+    if (
+      !doctor ||
+      doctor.role !== "Doctor" ||
+      !doctor.alive ||
+      !room.pendingDoctorTargetId ||
+      room.doctorUsedIds.has(doctor.id)
+    )
+      return;
+
+    const target = room.players.find(
+      (player) => player.id === room.pendingDoctorTargetId,
+    );
+
+    if (save && target && target.alive) {
+      room.doctorUsedIds.add(doctor.id);
+      room.revealedRoleIds.add(doctor.id);
+      room.revealedRoleIds.add(target.id);
+      addRoomMessage(room, {
+        name: "System",
+        text: `Doctor ${doctor.name} saved ${target.name}. Roles revealed: Doctor and ${target.role}.`,
+        time: now(),
+        system: true,
+      });
+      setLastEvent(
+        room,
+        "Doctor save",
+        `${doctor.name} saved ${target.name}. Roles revealed: Doctor and ${target.role}.`,
+        "success",
+      );
+    }
+
+    if (room.pendingDoctorSource === "night") {
+      const wolfVotes = collectWolfVotes(room);
+
+      if (!save && target && target.alive) {
+        target.alive = false;
+        room.revealedRoleIds.add(target.id);
+        addRoomMessage(room, {
+          name: "System",
+          text: `${target.name} did not survive the night. Role: ${target.role}.`,
+          time: now(),
+          system: true,
+        });
+        setLastEvent(
+          room,
+          `${target.name} died during the night`,
+          `The Doctor did not save ${target.name}. Role: ${target.role}.`,
+          "danger",
+        );
+        applyLoverLinkDeath(room, target.id);
+      }
+
+      room.nightHistory.push({
+        night: room.night,
+        victim: !save && target ? { id: target.id, name: target.name, role: target.role } : null,
+        protected: save && target ? { id: target.id, name: target.name } : null,
+        wolfVotes,
+      });
+
+      if (!save && target?.role === "Hunter" && io.sockets.sockets.has(target.id)) {
+        room.pendingDoctorTargetId = null;
+        room.pendingDoctorSource = null;
+        room.pendingHunterId = target.id;
+        room.phaseEndsAt = Date.now() + 30_000;
+        emitState(roomCode);
+        return;
+      }
+
+      room.pendingDoctorTargetId = null;
+      room.pendingDoctorSource = null;
+      room.nightActions.clear();
+      room.wolfChatMessages = [];
+      room.girlPeekActive = false;
+      room.girlPeekExpiresAt = 0;
+      room.girlPeekStartedAt = 0;
+      room.girlOfTheNightId = null;
+
+      if (!checkWinner(room)) {
+        room.phase = "day";
+        room.phaseEndsAt = Date.now() + 180_000;
+      }
+
+      emitState(roomCode);
+      return;
+    }
+
+    if (room.pendingDoctorSource === "vote") {
+      if (!save && target && target.alive) {
+        target.alive = false;
+        room.revealedRoleIds.add(target.id);
+        addRoomMessage(room, {
+          name: "System",
+          text: `${target.name} was voted out by the village. Role: ${target.role}.`,
+          time: now(),
+          system: true,
+        });
+        setLastEvent(
+          room,
+          `${target.name} was voted out`,
+          `The Doctor did not save ${target.name}. Role: ${target.role}.`,
+          "danger",
+        );
+        applyLoverLinkDeath(room, target.id);
+
+        room.voteHistory.push({
+          phase: room.night,
+          votedOut: { id: target.id, name: target.name, role: target.role },
+          votes: new Map(room.votes),
+        });
+
+        if (target.role === "Hunter" && io.sockets.sockets.has(target.id)) {
+          room.pendingDoctorTargetId = null;
+          room.pendingDoctorSource = null;
+          room.pendingHunterId = target.id;
+          room.phaseEndsAt = Date.now() + 30_000;
+          room.votes.clear();
+          emitState(roomCode);
+          return;
+        }
+      }
+
+      room.pendingDoctorTargetId = null;
+      room.pendingDoctorSource = null;
+      room.votes.clear();
+      if (!checkWinner(room)) {
+        room.phase = "night";
+        room.night += 1;
+        room.phaseEndsAt = Date.now() + 120_000;
+      }
+      emitState(roomCode);
+    }
+  });
+
   socket.on("disconnect", () => {
     const roomCode = socket.data.room ?? DEFAULT_ROOM;
     const room = getRoom(roomCode);
@@ -1595,6 +1851,10 @@ io.on("connection", (socket) => {
     }
 
     if (room.pendingHunterId === socket.id) room.pendingHunterId = null;
+    if (room.pendingDoctorTargetId === socket.id) {
+      room.pendingDoctorTargetId = null;
+      room.pendingDoctorSource = null;
+    }
     if (room.girlOfTheNightId === socket.id) {
       room.girlOfTheNightId = null;
       room.girlPeekActive = false;
