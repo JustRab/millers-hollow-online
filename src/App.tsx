@@ -234,6 +234,63 @@ function App() {
     socket.emit('room:join', { name: cleanName, room: cleanRoom })
   }
 
+  const meOrNull = state?.me ?? null
+  const phase = state?.phase ?? 'lobby'
+  const isLobby = phase === 'lobby'
+  const isNight = phase === 'night'
+  const isDay = phase === 'day'
+  const isDead = meOrNull ? !meOrNull.alive : false
+  const humans = state?.players.filter((player) => !player.id.endsWith('-bot')) ?? []
+  const isReady = meOrNull ? (state?.readyIds.includes(meOrNull.id) ?? false) : false
+  const readyCount = humans.filter((player) => state?.readyIds.includes(player.id)).length
+  const allPlayersReady = humans.length > 1 && humans.every((player) => state?.readyIds.includes(player.id))
+  const selectedPlayer = state?.players.find((player) => player.id === selected)
+  const inspectedRole = selected && state ? state.inspections[selected] : undefined
+  const isHost = meOrNull ? state?.hostId === meOrNull.id : false
+  const canHunterAct = meOrNull ? meOrNull.role === 'Hunter' && state?.pendingHunterId === meOrNull.id : false
+  const secondsLeft = state ? Math.max(0, Math.ceil((state.phaseEndsAt - clock) / 1000)) : 0
+  const timerText = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`
+  const voteTotal = state ? Object.values(state.voteCounts).reduce((total, count) => total + count, 0) : 0
+  const livingCount = state?.players.filter((player) => player.alive).length ?? 0
+  const phaseProgress = state?.phaseEndsAt
+    ? Math.max(0, Math.min(100, Math.round((secondsLeft / (isNight ? 120 : 180)) * 100)))
+    : 0
+  const recentSystemEvents = useMemo(
+    () => (state?.messages ?? []).filter((message) => message.system).slice(-4).reverse(),
+    [state?.messages],
+  )
+
+  const helperHints = useMemo(() => {
+    if (!meOrNull || !meOrNull.alive) {
+      return canHunterAct
+        ? ['You still have a final Hunter shot.', 'Pick one living player before the timer ends.']
+        : ['You are spectating now.', 'Track votes and chat to help your team after the round.']
+    }
+
+    if (isLobby) {
+      return [
+        isReady ? 'You are marked ready.' : 'Set ready to help the host start.',
+        isHost ? 'Host can start after all human players are ready.' : 'Wait for the host to start once everyone is ready.',
+      ]
+    }
+
+    if (isNight) {
+      if (meOrNull.role === 'GirlOfTheNight') return ['Use peek only when needed.', 'Peeking exposes you after 1 second.']
+      if (meOrNull.role === 'Dog') return ['Choose your side once each night.', 'This choice can shift win conditions quickly.']
+      if (meOrNull.role === 'Werewolf') return ['Coordinate with wolf chat.', 'Submit your target before phase ends.']
+      if (meOrNull.role === 'Doctor') return ['Protect a likely wolf target.', 'Try not to become predictable.']
+      if (meOrNull.role === 'Seer') return ['Inspect high-risk players first.', 'Use chat behavior to guide inspections.']
+      if (meOrNull.role === 'Maid') return ['Swap can change team power instantly.', 'Consider role timing before committing.']
+      if (meOrNull.role === 'Cupid') return ['Bind players who will impact future votes.', 'Lovers can create chain eliminations.']
+      return ['Watch chat carefully for tells.', 'Prepare a voting target for day.']
+    }
+
+    return [
+      state?.myVote ? 'Your vote is locked.' : 'Submit your vote before phase end.',
+      'Track who pushes fast accusations and late vote swings.',
+    ]
+  }, [canHunterAct, isLobby, isNight, meOrNull, isReady, isHost, state?.myVote])
+
   if (!state || !state.me) {
     return (
       <main className="app night join-screen">
@@ -277,61 +334,7 @@ function App() {
     )
   }
 
-  const { me, phase } = state
-  const isLobby = phase === 'lobby'
-  const isDead = !me.alive
-  const isNight = phase === 'night'
-  const isDay = phase === 'day'
-  const humans = state.players.filter((player) => !player.id.endsWith('-bot'))
-  const isReady = state.readyIds.includes(me.id)
-  const readyCount = humans.filter((player) => state.readyIds.includes(player.id)).length
-  const allPlayersReady = humans.length > 1 && humans.every((player) => state.readyIds.includes(player.id))
-  const selectedPlayer = state.players.find((player) => player.id === selected)
-  const inspectedRole = selected ? state.inspections[selected] : undefined
-  const isHost = state.hostId === me.id
-  const canHunterAct = me.role === 'Hunter' && state.pendingHunterId === me.id
-  const secondsLeft = Math.max(0, Math.ceil((state.phaseEndsAt - clock) / 1000))
-  const timerText = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`
-  const voteTotal = Object.values(state.voteCounts).reduce((total, count) => total + count, 0)
-  const livingCount = state.players.filter((player) => player.alive).length
-  const phaseProgress = state.phaseEndsAt
-    ? Math.max(0, Math.min(100, Math.round((secondsLeft / (isNight ? 120 : 180)) * 100)))
-    : 0
-  const recentSystemEvents = useMemo(
-    () => state.messages.filter((message) => message.system).slice(-4).reverse(),
-    [state.messages],
-  )
-
-  const helperHints = useMemo(() => {
-    if (!me.alive) {
-      return canHunterAct
-        ? ['You still have a final Hunter shot.', 'Pick one living player before the timer ends.']
-        : ['You are spectating now.', 'Track votes and chat to help your team after the round.']
-    }
-
-    if (isLobby) {
-      return [
-        isReady ? 'You are marked ready.' : 'Set ready to help the host start.',
-        isHost ? 'Host can start after all human players are ready.' : 'Wait for the host to start once everyone is ready.',
-      ]
-    }
-
-    if (isNight) {
-      if (me.role === 'GirlOfTheNight') return ['Use peek only when needed.', 'Peeking exposes you after 1 second.']
-      if (me.role === 'Dog') return ['Choose your side once each night.', 'This choice can shift win conditions quickly.']
-      if (me.role === 'Werewolf') return ['Coordinate with wolf chat.', 'Submit your target before phase ends.']
-      if (me.role === 'Doctor') return ['Protect a likely wolf target.', 'Try not to become predictable.']
-      if (me.role === 'Seer') return ['Inspect high-risk players first.', 'Use chat behavior to guide inspections.']
-      if (me.role === 'Maid') return ['Swap can change team power instantly.', 'Consider role timing before committing.']
-      if (me.role === 'Cupid') return ['Bind players who will impact future votes.', 'Lovers can create chain eliminations.']
-      return ['Watch chat carefully for tells.', 'Prepare a voting target for day.']
-    }
-
-    return [
-      state.myVote ? 'Your vote is locked.' : 'Submit your vote before phase end.',
-      'Track who pushes fast accusations and late vote swings.',
-    ]
-  }, [canHunterAct, isLobby, isNight, me.alive, me.role, isReady, isHost, state.myVote])
+  const me = state.me
 
   const toggleAudio = () => {
     const next = !audioEnabled
