@@ -941,6 +941,12 @@ io.on("connection", (socket) => {
 
         if (room.hostId === oldId) room.hostId = socket.id;
         if (room.pendingHunterId === oldId) room.pendingHunterId = socket.id;
+        if (room.pendingDoctorTargetId === oldId) {
+          room.pendingDoctorTargetId = socket.id;
+        }
+        if (room.girlOfTheNightId === oldId) {
+          room.girlOfTheNightId = socket.id;
+        }
 
         const oldInspection = room.inspections.get(oldId);
         if (oldInspection) {
