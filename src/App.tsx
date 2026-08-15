@@ -418,6 +418,15 @@ function App() {
                   ? 'Vision received'
                   : `Inspect ${selectedPlayer?.name ?? 'a player'}`
 
+  const roleAssigned = !isLobby
+  const roleNameDisplay = roleAssigned ? me.role : 'Hidden'
+  const roleSummaryDisplay = roleAssigned
+    ? roleSummary(me.role)
+    : 'Your role is not assigned yet. Roles are secretly distributed when the match starts.'
+  const objectiveDisplay = roleAssigned
+    ? roleObjective(me.role)
+    : 'Ready up and wait for the host to begin the round.'
+
   const renderRoleActionContent = () => {
     if (canHunterAct) {
       return (
@@ -594,14 +603,14 @@ function App() {
 
           <div className="role-card">
             <div className="role-kicker"><Eye size={14} /> YOUR ROLE</div>
-            <div className="role-name">{me.role}</div>
-            <p>{roleSummary(me.role)}</p>
+            <div className={`role-name ${roleAssigned ? '' : 'role-hidden'}`}>{roleNameDisplay}</div>
+            <p>{roleSummaryDisplay}</p>
             <div className="role-secret"><Shield size={15} /><span>Only you can see this</span></div>
           </div>
 
           <div className="objective">
             <span className="section-label">YOUR OBJECTIVE</span>
-            <p>{roleObjective(me.role)}</p>
+            <p>{objectiveDisplay}</p>
           </div>
 
           <div className="helper-panel">
