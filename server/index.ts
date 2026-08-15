@@ -564,6 +564,7 @@ function emitState(roomCode: string) {
       votedIds:
         room.phase === "day" ? [...room.votes.keys()] : [],
       voteRevealUntil: room.voteRevealUntil,
+      lovers: [...room.lovers],
       myNightAction: room.nightActions.get(socket.id) ?? null,
       roleActionUnavailable: Boolean(
         me &&
@@ -925,7 +926,7 @@ function resolveExpiredPhases() {
     } else {
       if (room.votes.size > 0) {
         if (room.voteRevealUntil === 0) {
-          room.voteRevealUntil = Date.now() + 3_000;
+          room.voteRevealUntil = Date.now() + 5_000;
           room.phaseEndsAt = room.voteRevealUntil;
           emitState(roomCode);
         }
@@ -1699,7 +1700,7 @@ io.on("connection", (socket) => {
       connectedAlive.length === 0 ||
       connectedAlive.every((player) => room.votes.has(player.id))
     ) {
-      room.voteRevealUntil = Date.now() + 3_000;
+      room.voteRevealUntil = Date.now() + 5_000;
       room.phaseEndsAt = room.voteRevealUntil;
       emitState(roomCode);
       return;

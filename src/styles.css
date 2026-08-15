@@ -568,6 +568,23 @@ button {
   line-height: 1;
 }
 
+.lover-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: #ffb2c1;
+  font:
+    600 9px "DM Mono",
+    monospace;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.player-tile.lover .lover-heart {
+  box-shadow: 0 0 10px rgba(255, 137, 163, 0.28);
+}
+
 .player-tile.vote-reveal {
   border-color: #a7d477;
   background: #2d3b27;

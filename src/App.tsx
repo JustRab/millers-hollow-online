@@ -570,7 +570,10 @@ function App() {
     state?.voteRevealUntil && state.voteRevealUntil > clock,
   );
   const revealProgress = voteRevealActive && state?.voteRevealUntil
-    ? Math.min(1, Math.max(0, 1 - (state.voteRevealUntil - clock) / 3000))
+    ? Math.min(
+        1,
+        Math.max(0, 1 - (state.voteRevealUntil - clock) / 5000) * (5 / 3),
+      )
     : 0;
   const displayedVoteCounts = state
     ? Object.fromEntries(
@@ -1718,7 +1721,12 @@ function App() {
                       YOUR VOTE
                     </span>
                   )}
-                  {isLover && <span className="lover-heart" aria-label="Lover">♥</span>}
+                  {isLover && (
+                    <span className="lover-badge" aria-label="Lover">
+                      <span className="lover-heart">♥</span>
+                      <span>LOVER</span>
+                    </span>
+                  )}
                   {player.id === me.id ? (
                     <span className="you-label">YOU</span>
                   ) : me.role === "Cupid" && cupidTargets.includes(player.id) ? (
