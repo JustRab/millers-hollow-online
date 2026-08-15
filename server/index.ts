@@ -43,6 +43,7 @@ type Message = {
   text: string;
   time: string;
   system?: boolean;
+  wolf?: boolean;
 };
 
 type GameEvent = {
@@ -92,8 +93,12 @@ type RoomState = {
   wolfChatMessages: Message[];
   girlPeekActive: boolean;
   girlPeekExpiresAt: number;
+  girlPeekStartedAt: number;
   girlOfTheNightId: string | null;
   lovers: string[];
+  doctorUsedIds: Set<string>;
+  cupidUsedIds: Set<string>;
+  revealedRoleIds: Set<string>;
   rolePreset: RolePreset;
   roomLocked: boolean;
   tutorialEnabled: boolean;
@@ -161,8 +166,12 @@ function createRoomState(): RoomState {
     wolfChatMessages: [],
     girlPeekActive: false,
     girlPeekExpiresAt: 0,
+    girlPeekStartedAt: 0,
     girlOfTheNightId: null,
     lovers: [],
+    doctorUsedIds: new Set(),
+    cupidUsedIds: new Set(),
+    revealedRoleIds: new Set(),
     rolePreset: "classic",
     roomLocked: false,
     tutorialEnabled: true,
@@ -183,7 +192,11 @@ function cloneRoom(room: RoomState): RoomState {
     nightActions: new Map(room.nightActions),
     readyPlayers: new Set(room.readyPlayers),
     wolfChatMessages: room.wolfChatMessages.map((message) => ({ ...message })),
+    girlPeekStartedAt: room.girlPeekStartedAt,
     lovers: [...room.lovers],
+    doctorUsedIds: new Set(room.doctorUsedIds),
+    cupidUsedIds: new Set(room.cupidUsedIds),
+    revealedRoleIds: new Set(room.revealedRoleIds),
     lastEvent: room.lastEvent ? { ...room.lastEvent } : null,
     nightHistory: room.nightHistory.map((nh) => ({
       ...nh,
@@ -220,11 +233,12 @@ function getTutorialHint(phase: Phase, role: Role, night: number): string {
   if (phase === "night") {
     if (role === "Werewolf")
       return "Choose a target to attack. Majority vote decides the victim.";
-    if (role === "Doctor") return "Select a player to protect tonight.";
+    if (role === "Doctor")
+      return "Mark a player to save once if they are attacked or voted out.";
     if (role === "Seer") return "Inspect a player to learn their role.";
     if (role === "Dog") return "Choose your allegiance: villager or werewolf.";
     if (role === "GirlOfTheNight")
-      return "Peek into the wolf chat to hear their whispers (risky!).";
+      return "Peek into wolf chat. Wolves only see the eye icon after 3 seconds.";
     if (role === "Cupid")
       return "Bind two players with love. They will die together.";
     if (role === "Maid") return "Swap roles with another player in secret.";
@@ -390,7 +404,9 @@ function checkWinner(room: RoomState) {
 
 function publicPlayers(room: RoomState) {
   return room.players.map(({ id, name, alive, role }) =>
-    room.winner ? { id, name, alive, role } : { id, name, alive },
+    room.winner || !alive || room.revealedRoleIds.has(id)
+      ? { id, name, alive, role }
+      : { id, name, alive },
   );
 }
 
@@ -460,7 +476,10 @@ function emitState(roomCode: string) {
         (me.role === "GirlOfTheNight" && room.girlPeekActive)),
     );
 
-    const watchedIds = room.girlPeekActive
+    const watchedIds =
+      me?.role === "Werewolf" &&
+      room.girlPeekActive &&
+      Date.now() - room.girlPeekStartedAt >= 3_000
       ? aliveWolves(room).map((player) => player.id)
       : [];
 
@@ -485,8 +504,8 @@ function emitState(roomCode: string) {
         ? { id: me.id, name: me.name, role: me.role, alive: me.alive }
         : null,
       inspections: Object.fromEntries(room.inspections.get(socket.id) ?? []),
-      myVote: room.votes.get(socket.id) ?? null,
-      voteCounts: voteCounts(room),
+      myVote: room.phase === "day" ? (room.votes.get(socket.id) ?? null) : null,
+      voteCounts: room.phase === "day" ? voteCounts(room) : {},
       myNightAction: room.nightActions.get(socket.id) ?? null,
       messages: room.messages,
       wolfChatMessages: canSeeWolfChat ? room.wolfChatMessages : [],
@@ -511,7 +530,7 @@ function resolveNight(roomCode: string) {
     (player) => player.alive && player.role === "Doctor",
   );
   const victimId = resolveWolfVictim(room);
-  const protectedId = doctor ? room.nightActions.get(doctor.id) : undefined;
+  const doctorTargetId = doctor ? room.nightActions.get(doctor.id) : undefined;
 
   const wolfVotes = new Map<string, string>();
   for (const [actorId, targetId] of room.nightActions.entries()) {
@@ -519,40 +538,79 @@ function resolveNight(roomCode: string) {
     if (actor?.role === "Werewolf") wolfVotes.set(actorId, targetId);
   }
 
-  const victim =
-    victimId && victimId !== protectedId
-      ? room.players.find((player) => player.id === victimId)
-      : null;
+  const victim = victimId
+    ? room.players.find((player) => player.id === victimId)
+    : null;
 
   if (victim && victim.alive) {
-    victim.alive = false;
-    addRoomMessage(room, {
-      name: "System",
-      text: `${victim.name} did not survive the night. Role: ${victim.role}.`,
-      time: now(),
-      system: true,
-    });
-    setLastEvent(
-      room,
-      `${victim.name} died during the night`,
-      `The village wakes to a missing voice. Role: ${victim.role}.`,
-      "danger",
-    );
+    const doctorCanSave =
+      doctor &&
+      doctorTargetId === victim.id &&
+      !room.doctorUsedIds.has(doctor.id);
 
-    applyLoverLinkDeath(room, victim.id);
+    if (doctorCanSave && doctor) {
+      room.doctorUsedIds.add(doctor.id);
+      room.revealedRoleIds.add(doctor.id);
+      room.revealedRoleIds.add(victim.id);
 
-    room.nightHistory.push({
-      night: room.night,
-      victim: { id: victim.id, name: victim.name, role: victim.role },
-      protected: doctor ? { id: doctor.id, name: doctor.name } : null,
-      wolfVotes,
-    });
+      addRoomMessage(room, {
+        name: "System",
+        text: `The Doctor saved ${victim.name}. Doctor: ${doctor.name} (${doctor.role}). Saved player role: ${victim.role}.`,
+        time: now(),
+        system: true,
+      });
+      setLastEvent(
+        room,
+        "The Doctor revealed themself",
+        `${doctor.name} saved ${victim.name}. Roles revealed: Doctor and ${victim.role}.`,
+        "success",
+      );
 
-    if (victim.role === "Hunter" && io.sockets.sockets.has(victim.id)) {
-      room.pendingHunterId = victim.id;
-      room.phaseEndsAt = Date.now() + 30_000;
-      emitState(roomCode);
-      return;
+      room.nightHistory.push({
+        night: room.night,
+        victim: null,
+        protected: { id: victim.id, name: victim.name },
+        wolfVotes,
+      });
+    } else {
+      victim.alive = false;
+      room.revealedRoleIds.add(victim.id);
+
+      addRoomMessage(room, {
+        name: "System",
+        text: `${victim.name} did not survive the night. Role: ${victim.role}.`,
+        time: now(),
+        system: true,
+      });
+      setLastEvent(
+        room,
+        `${victim.name} died during the night`,
+        `The village wakes to a missing voice. Role: ${victim.role}.`,
+        "danger",
+      );
+
+      applyLoverLinkDeath(room, victim.id);
+
+      room.nightHistory.push({
+        night: room.night,
+        victim: { id: victim.id, name: victim.name, role: victim.role },
+        protected: doctorTargetId
+          ? {
+              id: doctorTargetId,
+              name:
+                room.players.find((player) => player.id === doctorTargetId)
+                  ?.name ?? "Unknown",
+            }
+          : null,
+        wolfVotes,
+      });
+
+      if (victim.role === "Hunter" && io.sockets.sockets.has(victim.id)) {
+        room.pendingHunterId = victim.id;
+        room.phaseEndsAt = Date.now() + 30_000;
+        emitState(roomCode);
+        return;
+      }
     }
   } else {
     addRoomMessage(room, {
@@ -564,21 +622,37 @@ function resolveNight(roomCode: string) {
     setLastEvent(
       room,
       "Nobody was lost",
-      "The Doctor protected the target.",
+      "No one was eliminated during the night.",
       "success",
     );
     room.nightHistory.push({
       night: room.night,
       victim: null,
-      protected: doctor ? { id: doctor.id, name: doctor.name } : null,
+      protected: doctorTargetId
+        ? {
+            id: doctorTargetId,
+            name:
+              room.players.find((player) => player.id === doctorTargetId)
+                ?.name ?? "Unknown",
+          }
+        : null,
       wolfVotes,
     });
   }
 
+  const preserveDoctorTarget =
+    doctor && doctorTargetId && !room.doctorUsedIds.has(doctor.id)
+      ? doctorTargetId
+      : null;
+
   room.nightActions.clear();
+  if (doctor && preserveDoctorTarget) {
+    room.nightActions.set(doctor.id, preserveDoctorTarget);
+  }
   room.wolfChatMessages = [];
   room.girlPeekActive = false;
   room.girlPeekExpiresAt = 0;
+  room.girlPeekStartedAt = 0;
 
   if (!checkWinner(room)) {
     room.phase = "day";
@@ -593,28 +667,9 @@ function resolveExpiredPhases() {
     const room = getRoom(roomCode);
 
     if (room.girlPeekActive && Date.now() >= room.girlPeekExpiresAt) {
-      const girl = room.players.find(
-        (player) => player.id === room.girlOfTheNightId,
-      );
-      if (girl && girl.alive) {
-        girl.alive = false;
-        addRoomMessage(room, {
-          name: "System",
-          text: `${girl.name} was discovered while watching the wolf chat. Role: ${girl.role}.`,
-          time: now(),
-          system: true,
-        });
-        setLastEvent(
-          room,
-          "The Girl of the Night was discovered",
-          `The wolves saw the watching eye and struck. Role: ${girl.role}.`,
-          "danger",
-        );
-        applyLoverLinkDeath(room, girl.id);
-      }
       room.girlPeekActive = false;
       room.girlPeekExpiresAt = 0;
-      checkWinner(room);
+      room.girlPeekStartedAt = 0;
       emitState(roomCode);
       continue;
     }
@@ -624,6 +679,7 @@ function resolveExpiredPhases() {
 
     if (room.pendingHunterId) {
       room.pendingHunterId = null;
+      room.votes.clear();
       addRoomMessage(room, {
         name: "System",
         text: "The Hunter did not take a final shot.",
@@ -763,6 +819,10 @@ io.on("connection", (socket) => {
         }
 
         if (room.readyPlayers.delete(oldId)) room.readyPlayers.add(socket.id);
+        if (room.doctorUsedIds.delete(oldId)) room.doctorUsedIds.add(socket.id);
+        if (room.cupidUsedIds.delete(oldId)) room.cupidUsedIds.add(socket.id);
+        if (room.revealedRoleIds.delete(oldId))
+          room.revealedRoleIds.add(socket.id);
 
         const migratedVotes = new Map<string, string>();
         for (const [voterId, targetId] of room.votes.entries()) {
@@ -831,7 +891,12 @@ io.on("connection", (socket) => {
     )
       return;
 
-    addWolfMessage(room, { name: player.name, text: clean, time: now() });
+    addWolfMessage(room, {
+      name: player.name,
+      text: clean,
+      time: now(),
+      wolf: player.role === "Werewolf",
+    });
     emitState(roomCode);
   });
 
@@ -868,7 +933,11 @@ io.on("connection", (socket) => {
     room.wolfChatMessages = [];
     room.girlPeekActive = false;
     room.girlPeekExpiresAt = 0;
+    room.girlPeekStartedAt = 0;
     room.lovers = [];
+    room.doctorUsedIds.clear();
+    room.cupidUsedIds.clear();
+    room.revealedRoleIds.clear();
 
     room.phase = "night";
     room.night = 1;
@@ -909,8 +978,12 @@ io.on("connection", (socket) => {
     room.wolfChatMessages = [];
     room.girlPeekActive = false;
     room.girlPeekExpiresAt = 0;
+    room.girlPeekStartedAt = 0;
     room.girlOfTheNightId = null;
     room.lovers = [];
+    room.doctorUsedIds.clear();
+    room.cupidUsedIds.clear();
+    room.revealedRoleIds.clear();
     room.readyPlayers.clear();
     room.messages = [
       {
@@ -950,6 +1023,15 @@ io.on("connection", (socket) => {
       room.readyPlayers.delete(targetId);
       room.votes.delete(targetId);
       room.nightActions.delete(targetId);
+      room.doctorUsedIds.delete(targetId);
+      room.cupidUsedIds.delete(targetId);
+      room.revealedRoleIds.delete(targetId);
+      for (const [voterId, votedId] of [...room.votes.entries()]) {
+        if (votedId === targetId) room.votes.delete(voterId);
+      }
+      for (const [actorId, actionTarget] of [...room.nightActions.entries()]) {
+        if (actionTarget === targetId) room.nightActions.delete(actorId);
+      }
       emitState(roomCode);
     }
   });
@@ -985,7 +1067,11 @@ io.on("connection", (socket) => {
     room.wolfChatMessages = [];
     room.girlPeekActive = false;
     room.girlPeekExpiresAt = 0;
+    room.girlPeekStartedAt = 0;
     room.lovers = [];
+    room.doctorUsedIds.clear();
+    room.cupidUsedIds.clear();
+    room.revealedRoleIds.clear();
 
     room.phase = "night";
     room.night = 1;
@@ -1061,6 +1147,7 @@ io.on("connection", (socket) => {
     room.wolfChatMessages = [];
     room.girlPeekActive = false;
     room.girlPeekExpiresAt = 0;
+    room.girlPeekStartedAt = 0;
 
     addRoomMessage(room, {
       name: "System",
@@ -1105,8 +1192,11 @@ io.on("connection", (socket) => {
       room.nightActions.set(actor.id, target.id);
       socket.emit("game:action-confirmed", {
         title:
-          actor.role === "Werewolf" ? "Victim selected" : "Protection selected",
-        detail: `${target.name} is locked in for this night.`,
+          actor.role === "Werewolf" ? "Victim selected" : "Save target selected",
+        detail:
+          actor.role === "Werewolf"
+            ? `${target.name} is your current target. You can still change it before night ends.`
+            : `${target.name} is your current save target. You can still change it before night ends.`,
       });
 
       const requiredActors = room.players.filter(
@@ -1184,7 +1274,8 @@ io.on("connection", (socket) => {
       return;
 
     room.girlPeekActive = true;
-    room.girlPeekExpiresAt = Date.now() + 1_000;
+    room.girlPeekStartedAt = Date.now();
+    room.girlPeekExpiresAt = Date.now() + 6_000;
     room.girlOfTheNightId = girl.id;
     addRoomMessage(room, {
       name: "System",
@@ -1195,7 +1286,7 @@ io.on("connection", (socket) => {
     setLastEvent(
       room,
       "A hidden gaze",
-      "The wolves sense they are being watched.",
+      "The wolves only see the eye icon if the peek lasts at least 3 seconds.",
       "info",
     );
     emitState(roomCode);
@@ -1213,12 +1304,27 @@ io.on("connection", (socket) => {
     )
       return;
 
+    if (room.cupidUsedIds.has(cupid.id)) {
+      socket.emit("game:error", "Cupid can only bind lovers once per match.");
+      return;
+    }
+
     const ids = Array.isArray(targetIds) ? targetIds : [];
     const first = room.players.find((player) => player.id === ids[0]);
     const second = room.players.find((player) => player.id === ids[1]);
-    if (!first || !second || first.id === second.id) return;
+    if (
+      !first ||
+      !second ||
+      !first.alive ||
+      !second.alive ||
+      first.id === second.id ||
+      first.id === cupid.id ||
+      second.id === cupid.id
+    )
+      return;
 
     room.lovers = [first.id, second.id];
+    room.cupidUsedIds.add(cupid.id);
     room.nightActions.set(cupid.id, `${first.id}|${second.id}`);
     addRoomMessage(room, {
       name: "System",
@@ -1244,6 +1350,7 @@ io.on("connection", (socket) => {
     if (!target || !target.alive || target.id === socket.id) return;
 
     target.alive = false;
+    room.revealedRoleIds.add(target.id);
     room.pendingHunterId = null;
     addRoomMessage(room, {
       name: "System",
@@ -1285,6 +1392,21 @@ io.on("connection", (socket) => {
     )
       return;
 
+    const alivePlayers = room.players.filter((player) => player.alive);
+    if (alivePlayers.length <= 5) {
+      socket.emit(
+        "game:error",
+        "Voting out players is only enabled when more than 5 players are alive.",
+      );
+      return;
+    }
+
+    for (const [voterId, votedId] of [...room.votes.entries()]) {
+      const voterAlive = room.players.find((player) => player.id === voterId)?.alive;
+      const targetAlive = room.players.find((player) => player.id === votedId)?.alive;
+      if (!voterAlive || !targetAlive) room.votes.delete(voterId);
+    }
+
     room.votes.set(voter.id, target.id);
     socket.emit("game:action-confirmed", {
       title: "Vote recorded",
@@ -1312,38 +1434,67 @@ io.on("connection", (socket) => {
           (player) => player.id === ranked[0][0],
         );
         if (eliminated && eliminated.alive) {
-          eliminated.alive = false;
-          addRoomMessage(room, {
-            name: "System",
-            text: `${eliminated.name} was voted out by the village. Role: ${eliminated.role}.`,
-            time: now(),
-            system: true,
-          });
-          setLastEvent(
-            room,
-            `${eliminated.name} was voted out`,
-            `The village made its choice. Role: ${eliminated.role}.`,
-            "danger",
+          const doctor = room.players.find(
+            (player) => player.alive && player.role === "Doctor",
           );
-          applyLoverLinkDeath(room, eliminated.id);
+          const doctorCanSave =
+            doctor &&
+            !room.doctorUsedIds.has(doctor.id) &&
+            room.nightActions.get(doctor.id) === eliminated.id;
 
-          room.voteHistory.push({
-            phase: room.night,
-            votedOut: {
-              id: eliminated.id,
-              name: eliminated.name,
-              role: eliminated.role,
-            },
-            votes: new Map(room.votes),
-          });
+          if (doctorCanSave && doctor) {
+            room.doctorUsedIds.add(doctor.id);
+            room.revealedRoleIds.add(doctor.id);
+            room.revealedRoleIds.add(eliminated.id);
+            addRoomMessage(room, {
+              name: "System",
+              text: `The village voted to eliminate ${eliminated.name}, but Doctor ${doctor.name} saved them. Roles revealed: Doctor and ${eliminated.role}.`,
+              time: now(),
+              system: true,
+            });
+            setLastEvent(
+              room,
+              "Vote save by Doctor",
+              `${doctor.name} saved ${eliminated.name}. Roles revealed: Doctor and ${eliminated.role}.`,
+              "success",
+            );
+          } else {
+            eliminated.alive = false;
+            room.revealedRoleIds.add(eliminated.id);
+            addRoomMessage(room, {
+              name: "System",
+              text: `${eliminated.name} was voted out by the village. Role: ${eliminated.role}.`,
+              time: now(),
+              system: true,
+            });
+            setLastEvent(
+              room,
+              `${eliminated.name} was voted out`,
+              `The village made its choice. Role: ${eliminated.role}.`,
+              "danger",
+            );
+            applyLoverLinkDeath(room, eliminated.id);
 
-          if (
-            eliminated.role === "Hunter" &&
-            io.sockets.sockets.has(eliminated.id)
-          ) {
-            room.pendingHunterId = eliminated.id;
-            emitState(roomCode);
-            return;
+            room.voteHistory.push({
+              phase: room.night,
+              votedOut: {
+                id: eliminated.id,
+                name: eliminated.name,
+                role: eliminated.role,
+              },
+              votes: new Map(room.votes),
+            });
+
+            if (
+              eliminated.role === "Hunter" &&
+              io.sockets.sockets.has(eliminated.id)
+            ) {
+              room.pendingHunterId = eliminated.id;
+              room.phaseEndsAt = Date.now() + 30_000;
+              room.votes.clear();
+              emitState(roomCode);
+              return;
+            }
           }
         }
       } else {
@@ -1417,12 +1568,23 @@ io.on("connection", (socket) => {
     room.readyPlayers.delete(socket.id);
     room.votes.delete(socket.id);
     room.nightActions.delete(socket.id);
+    room.doctorUsedIds.delete(socket.id);
+    room.cupidUsedIds.delete(socket.id);
+    room.revealedRoleIds.delete(socket.id);
+
+    for (const [voterId, votedId] of [...room.votes.entries()]) {
+      if (votedId === socket.id) room.votes.delete(voterId);
+    }
+    for (const [actorId, actionTarget] of [...room.nightActions.entries()]) {
+      if (actionTarget === socket.id) room.nightActions.delete(actorId);
+    }
 
     if (room.pendingHunterId === socket.id) room.pendingHunterId = null;
     if (room.girlOfTheNightId === socket.id) {
       room.girlOfTheNightId = null;
       room.girlPeekActive = false;
       room.girlPeekExpiresAt = 0;
+      room.girlPeekStartedAt = 0;
     }
 
     if (room.hostId === socket.id) {

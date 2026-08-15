@@ -27,7 +27,13 @@ import {
 
 type Phase = "lobby" | "night" | "day";
 type Player = { id: string; name: string; alive: boolean; role?: string };
-type Message = { name: string; text: string; time: string; system?: boolean };
+type Message = {
+  name: string;
+  text: string;
+  time: string;
+  system?: boolean;
+  wolf?: boolean;
+};
 type GameEvent = {
   id: number;
   title: string;
@@ -190,13 +196,13 @@ function roleSummary(role: string): string {
     case "Werewolf":
       return "Coordinate with the pack and remove villagers at night.";
     case "Doctor":
-      return "Protect one player each night from elimination.";
+      return "Mark one player and save them once from a kill or vote.";
     case "Hunter":
       return "If eliminated, you may fire one final shot.";
     case "Dog":
       return "At night, choose to side with villagers or wolves.";
     case "GirlOfTheNight":
-      return "Peek at wolf chat briefly. If exposed, you die.";
+      return "Peek at wolf chat; wolves only get warned after 3 seconds.";
     case "Cupid":
       return "Bind two players as lovers linked by fate.";
     case "Maid":
@@ -209,7 +215,7 @@ function roleSummary(role: string): string {
 function roleObjective(role: string): string {
   if (role === "Werewolf") return "Outnumber the village while staying hidden.";
   if (role === "GirlOfTheNight")
-    return "Peek quickly and never get caught watching.";
+    return "Peek for intel and back out before wolves see the eye warning.";
   if (role === "Cupid") return "Create a risky lover pair and read the table.";
   return "Identify the wolves before they control the village.";
 }
@@ -245,6 +251,7 @@ function App() {
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [presetDraft, setPresetDraft] = useState<RolePreset>("classic");
   const [dismissedTutorialHint, setDismissedTutorialHint] = useState(false);
+  const [cupidTargets, setCupidTargets] = useState<string[]>([]);
   const [showSummary, setShowSummary] = useState(false);
 
   const seenEvent = useRef(0);
@@ -359,6 +366,12 @@ function App() {
   }, [state?.tutorialHint, state?.phase, state?.night]);
 
   useEffect(() => {
+    if (state?.phase !== "night" || state?.me?.role !== "Cupid" || !state?.me?.alive) {
+      setCupidTargets([]);
+    }
+  }, [state?.phase, state?.me?.role, state?.me?.alive]);
+
+  useEffect(() => {
     villageChatEndRef.current?.scrollIntoView({
       behavior: "smooth",
       block: "end",
@@ -465,6 +478,7 @@ function App() {
     : 0;
   const livingCount =
     state?.players.filter((player) => player.alive).length ?? 0;
+  const votingEnabled = livingCount > 5;
   const phaseProgress = state?.phaseEndsAt
     ? Math.max(
         0,
@@ -506,7 +520,7 @@ function App() {
       if (meOrNull.role === "GirlOfTheNight")
         return [
           "Use peek only when needed.",
-          "Peeking exposes you after 1 second.",
+          "Wolves only get the eye warning after 3 seconds.",
         ];
       if (meOrNull.role === "Dog")
         return [
@@ -520,8 +534,8 @@ function App() {
         ];
       if (meOrNull.role === "Doctor")
         return [
-          "Protect a likely wolf target.",
-          "Try not to become predictable.",
+          "Mark one player to save if they are attacked or voted out.",
+          "Your first successful save reveals your role and theirs.",
         ];
       if (meOrNull.role === "Seer")
         return [
@@ -535,8 +549,8 @@ function App() {
         ];
       if (meOrNull.role === "Cupid")
         return [
-          "Bind players who will impact future votes.",
-          "Lovers can create chain eliminations.",
+          "Choose exactly two OTHER players.",
+          "Cupid can bind lovers only once per match.",
         ];
       return [
         "Watch chat carefully for tells.",
@@ -547,7 +561,9 @@ function App() {
     return [
       state?.myVote
         ? "Your vote is locked."
-        : "Submit your vote before phase end.",
+        : votingEnabled
+          ? "Submit your vote before phase end."
+          : "Voting is disabled at 5 or fewer players.",
       "Track who pushes fast accusations and late vote swings.",
     ];
   }, [
@@ -558,6 +574,7 @@ function App() {
     isReady,
     isHost,
     state?.myVote,
+    votingEnabled,
   ]);
 
   if (!state || !state.me) {
@@ -659,25 +676,28 @@ function App() {
   };
 
   const handleRoleAction = () => {
-    if (!selectedPlayer) return;
-
     if (canHunterAct) {
+      if (!selectedPlayer) return;
       socket.emit("hunter:shoot", selectedPlayer.id);
       return;
     }
 
     if (me.role === "Werewolf" || me.role === "Doctor" || me.role === "Maid") {
+      if (!selectedPlayer) return;
       socket.emit("night:action", selectedPlayer.id);
       return;
     }
 
     if (me.role === "Seer") {
+      if (!selectedPlayer) return;
       socket.emit("seer:inspect", selectedPlayer.id);
       return;
     }
 
     if (me.role === "Cupid") {
-      socket.emit("cupid:bind", [me.id, selectedPlayer.id]);
+      if (cupidTargets.length !== 2) return;
+      socket.emit("cupid:bind", cupidTargets);
+      setCupidTargets([]);
     }
   };
 
@@ -691,9 +711,7 @@ function App() {
     : isDead
       ? "No actions available"
       : me.role === "Werewolf" || me.role === "Doctor"
-        ? state.myNightAction
-          ? "Night action submitted"
-          : `Choose ${me.role === "Werewolf" ? "a victim" : "someone to protect"}`
+        ? `Choose ${me.role === "Werewolf" ? "a victim" : "someone to save"}`
         : me.role === "GirlOfTheNight"
           ? state.girlPeekActive
             ? "Watching the wolves"
@@ -701,7 +719,9 @@ function App() {
           : me.role === "Dog"
             ? "Choose your faction"
             : me.role === "Cupid"
-              ? "Bind two players"
+              ? cupidTargets.length === 2
+                ? "Ready to bind lovers"
+                : `Select 2 players (${cupidTargets.length}/2)`
               : me.role === "Maid"
                 ? state.myNightAction
                   ? "Role swap submitted"
@@ -751,8 +771,8 @@ function App() {
       return (
         <>
           <p className="action-copy">
-            Peek at wolf chat for 1 second. Wolves get a watched indicator when
-            you peek.
+            Peek into wolf chat. Wolves only get the eye warning if you keep
+            peeking for at least 3 seconds.
           </p>
           <button
             className="primary-btn"
@@ -822,14 +842,29 @@ function App() {
             ? "Select one living player to use your role action."
             : "Watch the board and coordinate with your team."}
         </p>
+        {me.role === "Cupid" && (
+          <p className="action-copy">
+            Selected lovers: {cupidTargets.length}/2
+            {cupidTargets.length > 0
+              ? ` (${cupidTargets
+                  .map(
+                    (id) =>
+                      state?.players.find((player) => player.id === id)?.name ??
+                      "Unknown",
+                  )
+                  .join(" + ")})`
+              : ""}
+          </p>
+        )}
         <button
           className="primary-btn"
           disabled={
             isDead ||
-            !selectedPlayer ||
+            (me.role !== "Cupid" && !selectedPlayer) ||
+            (me.role === "Cupid" && cupidTargets.length !== 2) ||
             (me.role === "Seer" && !isNight) ||
             ((me.role === "Werewolf" || me.role === "Doctor") &&
-              (!isNight || !!state.myNightAction)) ||
+              !isNight) ||
             (me.role === "Maid" && !isNight) ||
             (me.role === "Cupid" && !isNight) ||
             !["Seer", "Werewolf", "Doctor", "Maid", "Cupid"].includes(me.role)
@@ -840,13 +875,13 @@ function App() {
           {me.role === "Seer"
             ? "Inspect player"
             : me.role === "Werewolf"
-              ? "Choose victim"
+              ? "Set wolf target"
               : me.role === "Doctor"
-                ? "Protect player"
+                ? "Set save target"
                 : me.role === "Maid"
                   ? "Swap role"
                   : me.role === "Cupid"
-                    ? "Bind lovers"
+                    ? "Bind selected lovers"
                     : "Action unavailable"}
         </button>
       </>
@@ -1103,6 +1138,25 @@ function App() {
         </aside>
 
         <section className="board-area">
+          {canHunterAct && (
+            <div className="hunter-urgent-panel">
+              <div>
+                <span className="section-label">HUNTER FINAL SHOT</span>
+                <strong>
+                  Select a living target now. This action is available only once.
+                </strong>
+              </div>
+              <button
+                className="primary-btn"
+                disabled={!selectedPlayer}
+                onClick={handleRoleAction}
+              >
+                <Eye size={16} />
+                Fire at {selectedPlayer?.name ?? "a player"}
+              </button>
+            </div>
+          )}
+
           {state.tutorialEnabled &&
             state.tutorialHint &&
             !isLobby &&
@@ -1408,8 +1462,10 @@ function App() {
                 ? canHunterAct
                   ? "You are eliminated but can still fire one final Hunter shot."
                   : "You are eliminated and now spectating this round."
-                : state.myNightAction
-                  ? "Your night action is locked in. Waiting for others."
+                : state.myNightAction && (me.role === "Werewolf" || me.role === "Doctor")
+                  ? "Your target is set. You can still change it before night ends."
+                  : state.myNightAction
+                    ? "Your night action is locked in. Waiting for others."
                   : state.myVote
                     ? "Your vote is locked. Wait for the village to finish voting."
                     : "Choose your action and keep watching player behavior."}
@@ -1437,11 +1493,24 @@ function App() {
                 <button
                   key={player.id}
                   className={`player-tile ${selected === player.id ? "selected" : ""} ${!player.alive ? "dead" : ""} ${player.id === me.id ? "self" : ""}`}
-                  onClick={() =>
-                    player.alive &&
-                    player.id !== me.id &&
-                    setSelected(player.id)
-                  }
+                  onClick={() => {
+                    if (!player.alive || player.id === me.id) return;
+
+                    if (me.role === "Cupid" && isNight) {
+                      setCupidTargets((current) => {
+                        if (current.includes(player.id)) {
+                          return current.filter((id) => id !== player.id);
+                        }
+                        if (current.length >= 2) {
+                          return [current[1], player.id];
+                        }
+                        return [...current, player.id];
+                      });
+                      return;
+                    }
+
+                    setSelected(player.id);
+                  }}
                   disabled={!player.alive}
                 >
                   <div className="avatar">
@@ -1459,7 +1528,7 @@ function App() {
                               ? "Ready to play"
                               : "Waiting in lobby"
                             : "In the village"
-                          : "Lost to the night"}
+                          : `Eliminated (${player.role ?? "Unknown"})`}
                     </span>
                   </div>
                   {isLobby && (
@@ -1482,6 +1551,8 @@ function App() {
                   )}
                   {player.id === me.id ? (
                     <span className="you-label">YOU</span>
+                  ) : me.role === "Cupid" && cupidTargets.includes(player.id) ? (
+                    <span className="target-mark">LOVER</span>
                   ) : !player.alive ? (
                     <Skull size={16} className="skull" />
                   ) : (
@@ -1500,7 +1571,9 @@ function App() {
                 <div>
                   <span className="section-label">DAY VOTE</span>
                   <h3>
-                    {state.myVote
+                    {!votingEnabled
+                      ? "Voting disabled in endgame"
+                      : state.myVote
                       ? "Vote submitted"
                       : `Accuse ${selectedPlayer?.name ?? "a player"}`}
                   </h3>
@@ -1529,17 +1602,22 @@ function App() {
                 </div>
               </div>
               <p className="action-copy">
-                Choose who you believe is a werewolf. Your vote is visible to
-                the village.
+                {votingEnabled
+                  ? "Choose who you believe is a werewolf. Your vote is visible to the village."
+                  : "With 5 or fewer players alive, vote eliminations are disabled."}
               </p>
               <button
                 className="primary-btn"
-                disabled={isDead || !selectedPlayer || !!state.myVote}
+                disabled={
+                  isDead || !selectedPlayer || !!state.myVote || !votingEnabled
+                }
                 onClick={submitVote}
               >
                 <Users size={17} />
                 {isDead
                   ? "Spectating"
+                  : !votingEnabled
+                    ? "Voting disabled (5 or fewer alive)"
                   : state.myVote
                     ? `Voted for ${state.players.find((player) => player.id === state.myVote)?.name ?? "a player"}`
                     : "Submit vote"}
@@ -1647,11 +1725,14 @@ function App() {
               <div className="chat-messages compact">
                 {(state.wolfChatMessages ?? []).map((message, index) => (
                   <div
-                    className="message system-message"
+                    className={`message system-message ${message.wolf ? "wolf-message" : "guest-wolf-message"}`}
                     key={`${message.time}-wolf-${index}`}
                   >
                     <div className="message-meta">
-                      <strong>{message.name}</strong>
+                      <strong>
+                        {message.wolf ? "[WOLF] " : "[PEEK] "}
+                        {message.name}
+                      </strong>
                       <span>{message.time}</span>
                     </div>
                     <p>{message.text}</p>
