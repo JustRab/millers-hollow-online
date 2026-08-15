@@ -269,6 +269,29 @@ function roleTag(role: string) {
   }
 }
 
+function roleGlyph(role: string) {
+  switch (role) {
+    case "Werewolf":
+      return "☾";
+    case "Seer":
+      return "◌";
+    case "Doctor":
+      return "✚";
+    case "Hunter":
+      return "✦";
+    case "Dog":
+      return "⚑";
+    case "GirlOfTheNight":
+      return "◉";
+    case "Cupid":
+      return "♥";
+    case "Maid":
+      return "✧";
+    default:
+      return "○";
+  }
+}
+
 function App() {
   const [state, setState] = useState<GameState | null>(null);
   const [nameDraft, setNameDraft] = useState(
@@ -1114,10 +1137,17 @@ function App() {
                 {roleTag(me.role)}
               </span>
             </div>
-            <div className={`role-name ${roleAssigned ? "" : "role-hidden"}`}>
-              {roleNameDisplay}
+            <div className="role-identity">
+              <div className={`role-icon ${roleThemeClass(me.role)}`}>
+                {roleGlyph(me.role)}
+              </div>
+              <div className="role-copy">
+                <div className={`role-name ${roleAssigned ? "" : "role-hidden"}`}>
+                  {roleNameDisplay}
+                </div>
+                <p>{roleSummaryDisplay}</p>
+              </div>
             </div>
-            <p>{roleSummaryDisplay}</p>
             <div className="role-secret">
               <Shield size={15} />
               <span>Only you can see this</span>
@@ -1249,9 +1279,16 @@ function App() {
             !isLobby &&
             !dismissedTutorialHint && (
               <div className="tutorial-hint-box">
-                <Lightbulb size={16} className="hint-icon" />
-                <div>
-                  <strong>Hint</strong>
+                <div className="hint-icon-wrap">
+                  <Lightbulb size={16} className="hint-icon" />
+                </div>
+                <div className="hint-content">
+                  <div className="hint-header">
+                    <strong>Quick hint</strong>
+                    <span className="hint-chip">
+                      {phase === "night" ? "Night" : "Day"}
+                    </span>
+                  </div>
                   <p>{state.tutorialHint}</p>
                 </div>
                 <button

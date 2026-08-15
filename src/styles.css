@@ -316,6 +316,55 @@ button {
   letter-spacing: 1.3px;
 }
 
+.role-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.role-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 216, 160, 0.3);
+  background: linear-gradient(135deg, rgba(255, 220, 170, 0.13), rgba(122, 88, 58, 0.14));
+  color: #f3d6a0;
+  font-size: 25px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.role-icon.theme-werewolf {
+  background: linear-gradient(135deg, rgba(129, 74, 74, 0.9), rgba(45, 22, 22, 0.9));
+  border-color: #a5635f;
+  color: #ffd8c7;
+}
+
+.role-icon.theme-seer {
+  background: linear-gradient(135deg, rgba(111, 121, 180, 0.9), rgba(25, 29, 49, 0.9));
+  border-color: #8da0d9;
+  color: #e4ebff;
+}
+
+.role-icon.theme-doctor {
+  background: linear-gradient(135deg, rgba(74, 128, 92, 0.9), rgba(16, 34, 22, 0.9));
+  border-color: #8ed0a1;
+  color: #dff5e5;
+}
+
+.role-icon.theme-girl {
+  background: linear-gradient(135deg, rgba(118, 88, 146, 0.9), rgba(32, 20, 41, 0.9));
+  border-color: #be9ade;
+  color: #f0dfff;
+}
+
+.role-copy {
+  flex: 1;
+  min-width: 0;
+}
+
 .role-tag {
   margin-left: auto;
   border: 1px solid rgba(255, 214, 145, 0.4);
@@ -333,7 +382,7 @@ button {
   font:
     600 25px "Playfair Display",
     serif;
-  margin: 15px 0 5px;
+  margin: 0 0 5px;
 }
 
 .role-card p,
@@ -1104,21 +1153,70 @@ button {
   background: linear-gradient(145deg, #2a2017, #1a120b);
   color: #f3eadc;
   box-shadow: inset 0 1px 0 rgba(255, 216, 155, 0.08);
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 32px;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 12px 10px;
+}
+
+.hint-icon-wrap {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(210, 156, 92, 0.18), rgba(117, 90, 56, 0.15));
+  border: 1px solid rgba(247, 206, 140, 0.3);
+  color: #f8d596;
+}
+
+.hint-content {
+  min-width: 0;
+}
+
+.hint-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.hint-chip {
+  border: 1px solid rgba(255, 211, 145, 0.3);
+  background: rgba(255, 205, 131, 0.06);
+  color: #f7d49a;
+  border-radius: 999px;
+  font:
+    9px "DM Mono",
+    monospace;
+  letter-spacing: 1px;
+  padding: 3px 6px;
 }
 
 .tutorial-hint-box strong {
   color: #ffd89f;
+  font-size: 13px;
 }
 
 .tutorial-hint-box p {
   color: #e9dbc7;
   line-height: 1.5;
+  margin: 0;
+  font-size: 12px;
 }
 
 .tutorial-hint-box button {
   border: 1px solid #8d6841;
   background: linear-gradient(180deg, #382a1c, #231a13);
   color: #f3dbc0;
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
 }
 
 .tutorial-hint-box button:hover {
