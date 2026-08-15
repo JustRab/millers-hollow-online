@@ -510,6 +510,25 @@ button {
   box-shadow: 0 0 0 1px rgba(199, 146, 76, 0.45);
 }
 
+.player-tile.lover {
+  border-color: #bc6b7a;
+  box-shadow: inset 0 0 0 1px rgba(255, 150, 169, 0.2);
+}
+
+.lover-heart {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(208, 91, 116, 0.16);
+  color: #ff9bb1;
+  border: 1px solid rgba(255, 156, 170, 0.45);
+  font-size: 12px;
+  line-height: 1;
+}
+
 .player-tile:disabled {
   cursor: default;
 }

@@ -77,6 +77,7 @@ type GameState = {
   wolfChatVisible?: boolean;
   girlPeekActive?: boolean;
   wolfWatchedIds?: string[];
+  lovers?: string[];
   rolePreset?: RolePreset;
   roomLocked?: boolean;
   tutorialEnabled?: boolean;
@@ -1610,10 +1611,11 @@ function App() {
               const watched = Boolean(
                 state.wolfWatchedIds?.includes(player.id),
               );
+              const isLover = Boolean(state.lovers?.includes(player.id));
               return (
                 <button
                   key={player.id}
-                  className={`player-tile ${selected === player.id ? "selected" : ""} ${!player.alive ? "dead" : ""} ${player.id === me.id ? "self" : ""} ${watched ? "watched" : ""}`}
+                  className={`player-tile ${selected === player.id ? "selected" : ""} ${!player.alive ? "dead" : ""} ${player.id === me.id ? "self" : ""} ${watched ? "watched" : ""} ${isLover ? "lover" : ""}`}
                   onClick={() => {
                     if (!player.alive || player.id === me.id) return;
 
@@ -1665,6 +1667,7 @@ function App() {
                       {state.voteCounts[player.id] === 1 ? "" : "s"}
                     </span>
                   )}
+                  {isLover && <span className="lover-heart" aria-label="Lover">♥</span>}
                   {player.id === me.id ? (
                     <span className="you-label">YOU</span>
                   ) : me.role === "Cupid" && cupidTargets.includes(player.id) ? (
