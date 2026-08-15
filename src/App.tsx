@@ -17,6 +17,12 @@ import {
   Sparkles,
   Clock3,
   AlertTriangle,
+  Lock,
+  Unlock,
+  Play,
+  X,
+  BookOpen,
+  Lightbulb,
 } from 'lucide-react'
 
 type Phase = 'lobby' | 'night' | 'day'
@@ -24,6 +30,9 @@ type Player = { id: string; name: string; alive: boolean }
 type Message = { name: string; text: string; time: string; system?: boolean }
 type GameEvent = { id: number; title: string; detail: string; tone: 'info' | 'danger' | 'success' }
 type DeathCause = 'voted' | 'night' | null
+type RolePreset = 'classic' | 'chaos' | 'beginner'
+type NightHistory = { night: number; victim: { id: string; name: string; role: string } | null; protected: { id: string; name: string } | null }
+type VoteHistory = { phase: number; votedOut: { id: string; name: string; role: string }; votes: Record<string, string> }
 
 type GameState = {
   room: string
@@ -46,6 +55,13 @@ type GameState = {
   wolfChatVisible?: boolean
   girlPeekActive?: boolean
   wolfWatchedIds?: string[]
+  rolePreset?: RolePreset
+  roomLocked?: boolean
+  tutorialEnabled?: boolean
+  tutorialHint?: string
+  sessionToken?: string
+  nightHistory?: NightHistory[]
+  voteHistory?: VoteHistory[]
 }
 
 type SoundCue = 'join' | 'chat' | 'vote' | 'action' | 'protect' | 'phase' | 'death' | 'tie' | 'success' | 'danger' | 'info'
@@ -149,6 +165,8 @@ function App() {
   const [state, setState] = useState<GameState | null>(null)
   const [nameDraft, setNameDraft] = useState(() => localStorage.getItem('millers-name') ?? '')
   const [roomDraft, setRoomDraft] = useState(() => new URLSearchParams(window.location.search).get('room')?.toUpperCase() || 'MILL-7Q2')
+  const [sessionToken, setSessionToken] = useState(() => localStorage.getItem('millers-token') ?? '')
+  const [showRejoin, setShowRejoin] = useState(false)
   const [selected, setSelected] = useState('')
   const [draft, setDraft] = useState('')
   const [wolfDraft, setWolfDraft] = useState('')
@@ -159,6 +177,9 @@ function App() {
   const [notice, setNotice] = useState<GameEvent | { id: number; title: string; detail: string; tone: 'info' } | null>(null)
   const [deathCause, setDeathCause] = useState<DeathCause>(null)
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
+  const [presetDraft, setPresetDraft] = useState<RolePreset>('classic')
+  const [showHostPanel, setShowHostPanel] = useState(false)
+  const [showSummary, setShowSummary] = useState(false)
 
   const seenEvent = useRef(0)
   const wasAlive = useRef<boolean | null>(null)
@@ -177,6 +198,15 @@ function App() {
         setDeathCause(nextState.lastEvent?.title.includes('voted out') ? 'voted' : 'night')
       }
 
+      if (nextState.sessionToken && nextState.sessionToken !== sessionToken) {
+        setSessionToken(nextState.sessionToken)
+        localStorage.setItem('millers-token', nextState.sessionToken)
+      }
+
+      if (nextState.winner && !state?.winner) {
+        setShowSummary(true)
+      }
+
       wasAlive.current = nextState.me?.alive ?? null
       setState(nextState)
 
@@ -188,6 +218,13 @@ function App() {
           setNotice((current) => (current?.id === nextState.lastEvent?.id ? null : current))
         }, 4200)
       }
+    })
+
+    socket.on('game:error', (message: string) => {
+      setNotice({ id: Date.now(), title: 'Error', detail: message, tone: 'danger' })
+      window.setTimeout(() => {
+        setNotice((current) => (current?.title === 'Error' ? null : current))
+      }, 3000)
     })
 
     socket.on('game:action-confirmed', (event: { title: string; detail: string }) => {
@@ -215,8 +252,9 @@ function App() {
       socket.off('game:state')
       socket.off('game:action-confirmed')
       socket.off('chat:received')
+      socket.off('game:error')
     }
-  }, [audioEnabled])
+  }, [audioEnabled, sessionToken, state?.winner])
 
   useEffect(() => {
     const interval = window.setInterval(() => setClock(Date.now()), 250)
@@ -240,6 +278,42 @@ function App() {
     playUiSound('join', audioEnabled)
     localStorage.setItem('millers-name', cleanName)
     socket.emit('room:join', { name: cleanName, room: cleanRoom })
+  }
+
+  const rejoinGame = () => {
+    const cleanName = nameDraft.trim().slice(0, 18)
+    const cleanRoom = roomDraft.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 16)
+    if (!cleanName || !cleanRoom || !sessionToken) return
+
+    primeAudio()
+    playUiSound('join', audioEnabled)
+    socket.emit('room:rejoin', { token: sessionToken, name: cleanName, room: cleanRoom })
+    setShowRejoin(false)
+  }
+
+  const setPreset = (preset: RolePreset) => {
+    setPresetDraft(preset)
+    socket.emit('room:set-preset', preset)
+  }
+
+  const toggleTutorial = () => {
+    socket.emit('room:toggle-tutorial')
+  }
+
+  const kickPlayer = (playerId: string) => {
+    socket.emit('host:kick', playerId)
+  }
+
+  const lockRoom = (locked: boolean) => {
+    socket.emit('host:lock-room', locked)
+  }
+
+  const forceStart = () => {
+    socket.emit('host:force-start')
+  }
+
+  const endMatch = () => {
+    socket.emit('host:end-match')
   }
 
   const meOrNull = state?.me ?? null
@@ -337,6 +411,16 @@ function App() {
               Enter the village <ChevronRight size={16} />
             </button>
           </div>
+
+          {sessionToken && (
+            <div className="rejoin-section">
+              <p className="rejoin-text">We found your previous session. Would you like to rejoin?</p>
+              <button className="secondary-btn" onClick={rejoinGame}>
+                <ChevronRight size={16} />
+                Rejoin the game
+              </button>
+            </div>
+          )}
         </div>
       </main>
     )
@@ -618,6 +702,58 @@ function App() {
             </ul>
           </div>
 
+          {isLobby && isHost && (
+            <div className="host-controls-panel">
+              <span className="section-label">HOST CONTROLS</span>
+              <div className="host-controls-group">
+                <button 
+                  className="host-control-btn" 
+                  onClick={() => lockRoom(!(state.roomLocked ?? false))}
+                  title={state.roomLocked ? 'Room is locked' : 'Room is open'}
+                >
+                  {state.roomLocked ? <Lock size={16} /> : <Unlock size={16} />}
+                  <span>{state.roomLocked ? 'Unlock Room' : 'Lock Room'}</span>
+                </button>
+                <button 
+                  className="host-control-btn" 
+                  onClick={forceStart}
+                  disabled={humans.length < 2}
+                >
+                  <Play size={16} />
+                  <span>Force Start</span>
+                </button>
+                <button 
+                  className="host-control-btn" 
+                  onClick={toggleTutorial}
+                >
+                  <BookOpen size={16} />
+                  <span>{state.tutorialEnabled ? 'Disable' : 'Enable'} Tutorial</span>
+                </button>
+              </div>
+              <div className="preset-selector">
+                <span className="preset-label">Role Preset</span>
+                <div className="preset-buttons">
+                  {(['classic', 'chaos', 'beginner'] as const).map((preset) => (
+                    <button
+                      key={preset}
+                      className={`preset-btn ${presetDraft === preset ? 'active' : ''}`}
+                      onClick={() => setPreset(preset)}
+                    >
+                      {preset.charAt(0).toUpperCase() + preset.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button 
+                className="danger-btn" 
+                onClick={endMatch}
+              >
+                <X size={16} />
+                End Match
+              </button>
+            </div>
+          )}
+
           {isLobby && (
             <>
               <button className="secondary-btn" onClick={() => socket.emit('room:ready', !isReady)}>
@@ -644,6 +780,19 @@ function App() {
         </aside>
 
         <section className="board-area">
+          {state.tutorialEnabled && state.tutorialHint && !isLobby && (
+            <div className="tutorial-hint-box">
+              <Lightbulb size={16} className="hint-icon" />
+              <div>
+                <strong>Hint</strong>
+                <p>{state.tutorialHint}</p>
+              </div>
+              <button onClick={() => socket.emit('room:toggle-tutorial')} aria-label="Close hint">
+                <X size={16} />
+              </button>
+            </div>
+          )}
+
           {isDead && (
             <div className="spectator-banner">
               <Skull size={19} />
@@ -690,6 +839,106 @@ function App() {
                 {state.lastEvent?.detail && <p className="winner-detail">{state.lastEvent.detail}</p>}
               </div>
               {isHost && <button className="rematch-btn" onClick={() => socket.emit('game:reset')}>Play again</button>}
+            </div>
+          )}
+
+          {state.winner && showSummary && (
+            <div className="summary-modal-overlay" onClick={() => setShowSummary(false)}>
+              <div className="summary-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="summary-header">
+                  <h2>Game Summary</h2>
+                  <button onClick={() => setShowSummary(false)} aria-label="Close summary">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="summary-content">
+                  {state.nightHistory && state.nightHistory.length > 0 && (
+                    <div className="summary-section">
+                      <h3><Moon size={16} /> Night-by-Night Timeline</h3>
+                      <div className="timeline">
+                        {state.nightHistory.map((night) => (
+                          <div key={`night-${night.night}`} className="timeline-entry">
+                            <div className="timeline-label">Night {String(night.night).padStart(2, '0')}</div>
+                            <div className="timeline-events">
+                              {night.victim && (
+                                <div className="timeline-event victim">
+                                  <Skull size={14} />
+                                  <span>{night.victim.name} ({night.victim.role}) was eliminated</span>
+                                </div>
+                              )}
+                              {night.protected && (
+                                <div className="timeline-event protected">
+                                  <Shield size={14} />
+                                  <span>{night.protected.name} was protected</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {state.voteHistory && state.voteHistory.length > 0 && (
+                    <div className="summary-section">
+                      <h3><Users size={16} /> Vote History</h3>
+                      <div className="vote-summary">
+                        {state.voteHistory.map((voteRecord) => (
+                          <div key={`vote-${voteRecord.phase}`} className="vote-entry">
+                            <div className="vote-result">
+                              <span className="vote-label">Day {String(voteRecord.phase).padStart(2, '0')}</span>
+                              <span className="voted-out">
+                                {voteRecord.votedOut.name} ({voteRecord.votedOut.role}) was eliminated
+                              </span>
+                            </div>
+                            <div className="votes-cast">
+                              {Object.entries(voteRecord.votes).map(([voter, target]) => (
+                                <div key={`${voter}-${target}`} className="vote-cast">
+                                  <span className="voter">{state.players.find((p) => p.id === voter)?.name ?? 'Unknown'}</span>
+                                  <span className="arrow">→</span>
+                                  <span className="votee">{state.players.find((p) => p.id === target)?.name ?? 'Unknown'}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="summary-section">
+                    <h3><Eye size={16} /> Final Roles Revealed</h3>
+                    <div className="roles-grid">
+                      {state.players.map((player) => (
+                        <div key={player.id} className="role-reveal">
+                          <div className="reveal-avatar">{player.name.slice(0, 2).toUpperCase()}</div>
+                          <div className="reveal-info">
+                            <strong>{player.name}</strong>
+                            <span className={`reveal-role ${player.alive ? 'alive' : 'dead'}`}>
+                              {meOrNull && meOrNull.id === player.id
+                                ? 'That was you'
+                                : player.alive ? 'Survived' : 'Eliminated'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="summary-footer">
+                  {isHost && (
+                    <button className="primary-btn" onClick={() => { setShowSummary(false); socket.emit('game:reset'); }}>
+                      <Sun size={16} />
+                      Start New Game
+                    </button>
+                  )}
+                  <button className="secondary-btn" onClick={() => setShowSummary(false)}>
+                    Close Summary
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

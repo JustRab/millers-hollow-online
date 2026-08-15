@@ -1,0 +1,20 @@
+{
+  "apps": [
+    {
+      "name": "millers-hollow",
+      "script": "tsx",
+      "args": "server/index.ts",
+      "watch": false,
+      "env": {
+        "NODE_ENV": "production",
+        "PORT": 3001
+      },
+      "error_file": "./logs/error.log",
+      "out_file": "./logs/out.log",
+      "log_date_format": "YYYY-MM-DD HH:mm:ss Z",
+      "max_memory_restart": "500M",
+      "instances": 1,
+      "restart_delay": 4000
+    }
+  ]
+}
