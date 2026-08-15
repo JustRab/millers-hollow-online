@@ -164,6 +164,8 @@ function App() {
 
   const seenEvent = useRef(0)
   const wasAlive = useRef<boolean | null>(null)
+  const villageChatEndRef = useRef<HTMLDivElement | null>(null)
+  const wolfChatEndRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const handleConnect = () => setConnected(true)
@@ -222,6 +224,14 @@ function App() {
     const interval = window.setInterval(() => setClock(Date.now()), 250)
     return () => window.clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    villageChatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [state?.messages.length])
+
+  useEffect(() => {
+    wolfChatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [state?.wolfChatMessages?.length, state?.wolfChatVisible])
 
   const joinGame = () => {
     const cleanName = nameDraft.trim().slice(0, 18)
@@ -651,12 +661,28 @@ function App() {
             </div>
           )}
 
+          {isLobby && (
+            <div className="lobby-action-bar">
+              <button className={`primary-btn ready-cta ${isReady ? 'is-ready' : ''}`} onClick={() => socket.emit('room:ready', !isReady)}>
+                <Users size={17} />
+                {isReady ? 'You are Ready - Click to Unready' : 'Ready Up Now'}
+              </button>
+              {isHost && (
+                <button className="secondary-btn host-start-cta" disabled={!allPlayersReady || humans.length < 2} onClick={() => socket.emit('game:start')}>
+                  <Sun size={16} />
+                  {allPlayersReady ? 'Start Match' : `Need ${Math.max(0, humans.length - readyCount)} more ready`}
+                </button>
+              )}
+            </div>
+          )}
+
           {state.winner && (
             <div className="winner-banner">
               <span className="winner-sigil">{state.winner === 'village' ? 'V' : 'W'}</span>
               <div>
                 <span className="section-label">GAME OVER</span>
                 <strong>{state.winner === 'village' ? 'The village survives.' : 'The werewolves take the village.'}</strong>
+                {state.lastEvent?.detail && <p className="winner-detail">{state.lastEvent.detail}</p>}
               </div>
               {isHost && <button className="rematch-btn" onClick={() => socket.emit('game:reset')}>Play again</button>}
             </div>
@@ -666,6 +692,22 @@ function App() {
             <div className="feedback-chip"><Sparkles size={14} /><span>{me.alive ? 'Alive' : 'Eliminated'}</span></div>
             <div className="feedback-chip"><Users size={14} /><span>{livingCount} active players</span></div>
             <div className="feedback-chip"><AlertTriangle size={14} /><span>{state.myVote ? 'Vote locked' : isDay ? 'Vote pending' : 'Night focus'}</span></div>
+          </div>
+
+          <div className="live-status-card">
+            <div className="live-status-head">
+              <span className="section-label">LIVE STATUS</span>
+              <strong>{isLobby ? 'Lobby' : isNight ? 'Night Phase' : 'Day Phase'}</strong>
+            </div>
+            <p>
+              {isDead
+                ? (canHunterAct ? 'You are eliminated but can still fire one final Hunter shot.' : 'You are eliminated and now spectating this round.')
+                : state.myNightAction
+                  ? 'Your night action is locked in. Waiting for others.'
+                  : state.myVote
+                    ? 'Your vote is locked. Wait for the village to finish voting.'
+                    : 'Choose your action and keep watching player behavior.'}
+            </p>
           </div>
 
           <div className="board-heading">
@@ -773,6 +815,7 @@ function App() {
                 <p>{message.text}</p>
               </div>
             ))}
+            <div ref={villageChatEndRef} />
           </div>
 
           <div className="chat-compose">
@@ -806,6 +849,7 @@ function App() {
                     <p>{message.text}</p>
                   </div>
                 ))}
+                <div ref={wolfChatEndRef} />
               </div>
 
               <div className="chat-compose">
