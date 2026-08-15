@@ -155,12 +155,12 @@ function assignRoles(room: RoomState) {
   if (total < 2) return
 
   const roles: Role[] = []
-  const wolfCount = total >= 6 ? 2 : 1
+  const wolfCount = Math.max(1, Math.floor(total / 4))
   for (let index = 0; index < wolfCount; index += 1) roles.push('Werewolf')
   if (total >= 3) roles.push('Seer')
   if (total >= 4) roles.push('Doctor')
-  if (total >= 5) roles.push('Hunter')
-  if (total >= 5) roles.push('Dog')
+  if (wolfCount >= 2 && total >= 5) roles.push('Hunter')
+  if (total >= 10) roles.push('Dog')
   if (total >= 6) roles.push('GirlOfTheNight')
   if (total >= 7) roles.push('Cupid')
   if (total >= 8) roles.push('Maid')
