@@ -100,7 +100,7 @@ type RoomState = {
   lovers: string[];
   doctorUsedIds: Set<string>;
   cupidUsedIds: Set<string>;
-  maidUsedIds: Set<string>;
+  maidUsed: boolean;
   revealedRoleIds: Set<string>;
   rolePreset: RolePreset;
   roomLocked: boolean;
@@ -176,7 +176,7 @@ function createRoomState(): RoomState {
     lovers: [],
     doctorUsedIds: new Set(),
     cupidUsedIds: new Set(),
-    maidUsedIds: new Set(),
+    maidUsed: false,
     revealedRoleIds: new Set(),
     rolePreset: "classic",
     roomLocked: false,
@@ -204,7 +204,7 @@ function cloneRoom(room: RoomState): RoomState {
     lovers: [...room.lovers],
     doctorUsedIds: new Set(room.doctorUsedIds),
     cupidUsedIds: new Set(room.cupidUsedIds),
-    maidUsedIds: new Set(room.maidUsedIds),
+    maidUsed: room.maidUsed,
     revealedRoleIds: new Set(room.revealedRoleIds),
     lastEvent: room.lastEvent ? { ...room.lastEvent } : null,
     nightHistory: room.nightHistory.map((nh) => ({
@@ -1075,9 +1075,11 @@ io.on("connection", (socket) => {
     room.girlPeekActive = false;
     room.girlPeekExpiresAt = 0;
     room.girlPeekStartedAt = 0;
+    room.girlOfTheNightId = null;
     room.lovers = [];
     room.doctorUsedIds.clear();
     room.cupidUsedIds.clear();
+    room.maidUsed = false;
     room.revealedRoleIds.clear();
 
     room.phase = "night";
@@ -1128,7 +1130,7 @@ io.on("connection", (socket) => {
     room.lovers = [];
     room.doctorUsedIds.clear();
     room.cupidUsedIds.clear();
-    room.maidUsedIds.clear();
+    room.maidUsed = false;
     room.revealedRoleIds.clear();
     room.readyPlayers.clear();
     room.messages = [
@@ -1220,9 +1222,11 @@ io.on("connection", (socket) => {
     room.girlPeekActive = false;
     room.girlPeekExpiresAt = 0;
     room.girlPeekStartedAt = 0;
+    room.girlOfTheNightId = null;
     room.lovers = [];
     room.doctorUsedIds.clear();
     room.cupidUsedIds.clear();
+    room.maidUsed = false;
     room.revealedRoleIds.clear();
 
     room.phase = "night";
@@ -1359,14 +1363,14 @@ io.on("connection", (socket) => {
     }
 
     if (actor.role === "Maid") {
-      if (room.maidUsedIds.has(actor.id)) {
+      if (room.maidUsed) {
         socket.emit("game:error", "The Maid can only swap once per match.");
         return;
       }
       const originalRole = actor.role;
       actor.role = target.role;
       target.role = originalRole;
-      room.maidUsedIds.add(actor.id);
+      room.maidUsed = true;
       room.nightActions.set(actor.id, target.id);
       addRoomMessage(room, {
         name: "System",
