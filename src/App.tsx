@@ -53,6 +53,10 @@ type VoteHistory = {
   votes: Record<string, string>;
 };
 
+type SummaryEvent =
+  | { key: string; order: number; kind: "night"; night: NightHistory }
+  | { key: string; order: number; kind: "vote"; vote: VoteHistory };
+
 type GameState = {
   room: string;
   phase: Phase;
@@ -72,6 +76,7 @@ type GameState = {
   myVote: string | null;
   myNightAction: string | null;
   voteCounts: Record<string, number>;
+  voteRevealUntil?: number;
   messages: Message[];
   wolfChatMessages?: Message[];
   wolfChatVisible?: boolean;
@@ -206,7 +211,7 @@ function roleSummary(role: string): string {
     case "Dog":
       return "At night, choose to side with villagers or wolves.";
     case "GirlOfTheNight":
-      return "Peek at wolf chat; wolves only get warned after 3 seconds.";
+      return "Open wolf chat as long as you like; wolves see you for 3 seconds after you linger.";
     case "Cupid":
       return "Bind two players as lovers linked by fate.";
     case "Maid":
@@ -219,7 +224,7 @@ function roleSummary(role: string): string {
 function roleObjective(role: string): string {
   if (role === "Werewolf") return "Outnumber the village while staying hidden.";
   if (role === "GirlOfTheNight")
-    return "Peek for intel and back out before wolves see the eye warning.";
+    return "Peek for intel, knowing wolves can spot you for 3 seconds after you linger.";
   if (role === "Cupid") return "Create a risky lover pair and read the table.";
   return "Identify the wolves before they control the village.";
 }
@@ -549,6 +554,9 @@ function App() {
   const voteTotal = state
     ? Object.values(state.voteCounts).reduce((total, count) => total + count, 0)
     : 0;
+  const voteRevealActive = Boolean(
+    state?.voteRevealUntil && state.voteRevealUntil > clock,
+  );
   const livingCount =
     state?.players.filter((player) => player.alive).length ?? 0;
   const phaseProgress = state?.phaseEndsAt
@@ -565,6 +573,21 @@ function App() {
         .reverse(),
     [state?.messages],
   );
+  const summaryTimeline = useMemo<SummaryEvent[]>(() => {
+    const nights: SummaryEvent[] = (state?.nightHistory ?? []).map((night) => ({
+      key: `night-${night.night}`,
+      order: night.night * 2,
+      kind: "night",
+      night,
+    }));
+    const votes: SummaryEvent[] = (state?.voteHistory ?? []).map((vote) => ({
+      key: `vote-${vote.phase}`,
+      order: vote.phase * 2 + 1,
+      kind: "vote",
+      vote,
+    }));
+    return [...nights, ...votes].sort((a, b) => a.order - b.order);
+  }, [state?.nightHistory, state?.voteHistory]);
 
   const helperHints = useMemo(() => {
     if (!meOrNull || !meOrNull.alive) {
@@ -848,8 +871,8 @@ function App() {
       return (
         <>
           <p className="action-copy">
-            Open or close wolf chat manually. If it stays open for more than 3
-            seconds, wolves will see your highlighted card.
+            Keep wolf chat open as long as you want. After 3 seconds, wolves
+            see your card highlighted in red for 3 seconds.
           </p>
           <button
             className="primary-btn"
@@ -1414,88 +1437,48 @@ function App() {
                 </div>
 
                 <div className="summary-content">
-                  {state.nightHistory && state.nightHistory.length > 0 && (
+                  {summaryTimeline.length > 0 && (
                     <div className="summary-section">
                       <h3>
-                        <Moon size={16} /> Night-by-Night Timeline
+                        <ScrollText size={16} /> Match Timeline
                       </h3>
-                      <div className="timeline">
-                        {state.nightHistory.map((night) => (
-                          <div
-                            key={`night-${night.night}`}
-                            className="timeline-entry"
-                          >
-                            <div className="timeline-label">
-                              Night {String(night.night).padStart(2, "0")}
+                      <p className="summary-section-intro">
+                        Events are ordered from the beginning of the match to the final decision.
+                      </p>
+                      <div className="summary-timeline">
+                        {summaryTimeline.map((event) =>
+                          event.kind === "night" ? (
+                            <div key={event.key} className="summary-event night-event">
+                              <div className="summary-event-marker"><Moon size={15} /></div>
+                              <div className="summary-event-body">
+                                <span className="summary-event-label">Night {String(event.night.night).padStart(2, "0")}</span>
+                                {event.night.victim ? (
+                                  <p><Skull size={14} /> {event.night.victim.name} ({event.night.victim.role}) was eliminated.</p>
+                                ) : (
+                                  <p>No one was eliminated.</p>
+                                )}
+                                {event.night.protected && (
+                                  <p className="protected-event"><Shield size={14} /> {event.night.protected.name} was protected.</p>
+                                )}
+                              </div>
                             </div>
-                            <div className="timeline-events">
-                              {night.victim && (
-                                <div className="timeline-event victim">
-                                  <Skull size={14} />
-                                  <span>
-                                    {night.victim.name} ({night.victim.role})
-                                    was eliminated
-                                  </span>
-                                </div>
-                              )}
-                              {night.protected && (
-                                <div className="timeline-event protected">
-                                  <Shield size={14} />
-                                  <span>
-                                    {night.protected.name} was protected
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {state.voteHistory && state.voteHistory.length > 0 && (
-                    <div className="summary-section">
-                      <h3>
-                        <Users size={16} /> Vote History
-                      </h3>
-                      <div className="vote-summary">
-                        {state.voteHistory.map((voteRecord) => (
-                          <div
-                            key={`vote-${voteRecord.phase}`}
-                            className="vote-entry"
-                          >
-                            <div className="vote-result">
-                              <span className="vote-label">
-                                Day {String(voteRecord.phase).padStart(2, "0")}
-                              </span>
-                              <span className="voted-out">
-                                {voteRecord.votedOut.name} (
-                                {voteRecord.votedOut.role}) was eliminated
-                              </span>
-                            </div>
-                            <div className="votes-cast">
-                              {Object.entries(voteRecord.votes).map(
-                                ([voter, target]) => (
-                                  <div
-                                    key={`${voter}-${target}`}
-                                    className="vote-cast"
-                                  >
-                                    <span className="voter">
-                                      {state.players.find((p) => p.id === voter)
-                                        ?.name ?? "Unknown"}
+                          ) : (
+                            <div key={event.key} className="summary-event vote-event">
+                              <div className="summary-event-marker"><Users size={15} /></div>
+                              <div className="summary-event-body">
+                                <span className="summary-event-label">Day {String(event.vote.phase).padStart(2, "0")} vote</span>
+                                <p><Skull size={14} /> {event.vote.votedOut.name} ({event.vote.votedOut.role}) was eliminated.</p>
+                                <div className="summary-vote-list">
+                                  {Object.entries(event.vote.votes).map(([voter, target]) => (
+                                    <span key={`${voter}-${target}`}>
+                                      {state.players.find((player) => player.id === voter)?.name ?? "Unknown"} voted for {state.players.find((player) => player.id === target)?.name ?? "Unknown"}
                                     </span>
-                                    <span className="arrow">→</span>
-                                    <span className="votee">
-                                      {state.players.find(
-                                        (p) => p.id === target,
-                                      )?.name ?? "Unknown"}
-                                    </span>
-                                  </div>
-                                ),
-                              )}
+                                  ))}
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          ),
+                        )}
                       </div>
                     </div>
                   )}
@@ -1609,6 +1592,8 @@ function App() {
             {state.players.map((player) => {
               const isPlayerReady = state.readyIds.includes(player.id);
               const votedFor = state.myVote === player.id;
+              const hasVotes = isDay && state.voteCounts[player.id] > 0;
+              const hasFinalVoteCount = voteRevealActive && state.voteCounts[player.id] > 0;
               const watched = Boolean(
                 state.wolfWatchedIds?.includes(player.id),
               );
@@ -1616,7 +1601,7 @@ function App() {
               return (
                 <button
                   key={player.id}
-                  className={`player-tile ${selected === player.id ? "selected" : ""} ${votedFor ? "voted-for" : ""} ${!player.alive ? "dead" : ""} ${player.id === me.id ? "self" : ""} ${watched ? "watched" : ""} ${isLover ? "lover" : ""}`}
+                  className={`player-tile ${selected === player.id ? "selected" : ""} ${votedFor ? "voted-for" : ""} ${hasVotes ? "has-votes" : ""} ${hasFinalVoteCount ? "vote-reveal" : ""} ${!player.alive ? "dead" : ""} ${player.id === me.id ? "self" : ""} ${watched ? "watched" : ""} ${isLover ? "lover" : ""}`}
                   onClick={() => {
                     if (!player.alive || player.id === me.id) return;
 
@@ -1720,6 +1705,11 @@ function App() {
                   />
                 </div>
               </div>
+              {voteRevealActive && (
+                <div className="vote-reveal-banner" role="status">
+                  <Sparkles size={15} /> Final vote count is being revealed
+                </div>
+              )}
               <p className="action-copy">
                 {state.myVote
                   ? `You voted for ${state.players.find((player) => player.id === state.myVote)?.name ?? "a player"}. Your vote is locked.`

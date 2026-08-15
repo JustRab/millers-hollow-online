@@ -90,6 +90,7 @@ type RoomState = {
   messages: Message[];
   inspections: Map<string, Map<string, Role>>;
   votes: Map<string, string>;
+  voteRevealUntil: number;
   nightActions: Map<string, string>;
   readyPlayers: Set<string>;
   wolfChatMessages: Message[];
@@ -166,6 +167,7 @@ function createRoomState(): RoomState {
     ],
     inspections: new Map(),
     votes: new Map(),
+    voteRevealUntil: 0,
     nightActions: new Map(),
     readyPlayers: new Set(),
     wolfChatMessages: [],
@@ -195,6 +197,7 @@ function cloneRoom(room: RoomState): RoomState {
       [...room.inspections].map(([id, map]) => [id, new Map(map)]),
     ),
     votes: new Map(room.votes),
+    voteRevealUntil: room.voteRevealUntil,
     nightActions: new Map(room.nightActions),
     pendingDoctorTargetId: room.pendingDoctorTargetId,
     pendingDoctorSource: room.pendingDoctorSource,
@@ -520,6 +523,7 @@ function emitState(roomCode: string) {
       me?.role === "Werewolf" &&
       room.girlPeekActive &&
       Date.now() - room.girlPeekStartedAt >= 3_000
+      && room.girlPeekExpiresAt > Date.now()
       ? room.girlOfTheNightId
         ? [room.girlOfTheNightId]
         : []
@@ -557,6 +561,7 @@ function emitState(roomCode: string) {
       inspections: Object.fromEntries(room.inspections.get(socket.id) ?? []),
       myVote: room.phase === "day" ? (room.votes.get(socket.id) ?? null) : null,
       voteCounts: room.phase === "day" ? voteCounts(room) : {},
+      voteRevealUntil: room.voteRevealUntil,
       myNightAction: room.nightActions.get(socket.id) ?? null,
       messages: room.messages,
       wolfChatMessages: canSeeWolfChat ? room.wolfChatMessages : [],
@@ -666,12 +671,20 @@ function resolveExpiredPhases() {
   for (const roomCode of roomStates.keys()) {
     const room = getRoom(roomCode);
 
-    if (room.girlPeekActive && Date.now() >= room.girlPeekExpiresAt) {
-      room.girlPeekActive = false;
-      room.girlPeekExpiresAt = 0;
-      room.girlPeekStartedAt = 0;
-      emitState(roomCode);
-      continue;
+    if (room.girlPeekActive) {
+      const currentTime = Date.now();
+      if (!room.girlPeekExpiresAt && currentTime - room.girlPeekStartedAt >= 3_000) {
+        room.girlPeekExpiresAt = room.girlPeekStartedAt + 6_000;
+        emitState(roomCode);
+      } else if (room.girlPeekExpiresAt && currentTime >= room.girlPeekExpiresAt) {
+        room.girlPeekExpiresAt = -1;
+        emitState(roomCode);
+      }
+    }
+
+    if (room.voteRevealUntil) {
+      if (Date.now() < room.voteRevealUntil) continue;
+      room.voteRevealUntil = 0;
     }
 
     if (room.pendingDoctorTargetId) {
@@ -811,6 +824,13 @@ function resolveExpiredPhases() {
     if (room.phase === "night") {
       resolveNight(roomCode);
     } else {
+      if (room.votes.size > 0) {
+        room.voteRevealUntil = Date.now() + 3_000;
+        room.phaseEndsAt = room.voteRevealUntil;
+        emitState(roomCode);
+        continue;
+      }
+
       const alivePlayers = room.players.filter((player) => player.alive);
       const connectedAlive = alivePlayers.filter((player) =>
         io.sockets.sockets.has(player.id),
@@ -1069,6 +1089,7 @@ io.on("connection", (socket) => {
     room.pendingDoctorTargetId = null;
     room.pendingDoctorSource = null;
     room.votes.clear();
+    room.voteRevealUntil = 0;
     room.nightActions.clear();
     room.readyPlayers.clear();
     room.wolfChatMessages = [];
@@ -1119,6 +1140,7 @@ io.on("connection", (socket) => {
     room.pendingDoctorTargetId = null;
     room.pendingDoctorSource = null;
     room.votes.clear();
+    room.voteRevealUntil = 0;
     room.nightActions.clear();
     room.pendingDoctorTargetId = null;
     room.pendingDoctorSource = null;
@@ -1216,6 +1238,7 @@ io.on("connection", (socket) => {
     room.pendingDoctorTargetId = null;
     room.pendingDoctorSource = null;
     room.votes.clear();
+    room.voteRevealUntil = 0;
     room.nightActions.clear();
     room.readyPlayers.clear();
     room.wolfChatMessages = [];
@@ -1299,6 +1322,7 @@ io.on("connection", (socket) => {
     if (room.phase === "night") room.night += 1;
 
     room.votes.clear();
+    room.voteRevealUntil = 0;
     room.nightActions.clear();
     room.wolfChatMessages = [];
     room.girlPeekActive = false;
@@ -1430,7 +1454,7 @@ io.on("connection", (socket) => {
 
     room.girlPeekActive = true;
     room.girlPeekStartedAt = Date.now();
-    room.girlPeekExpiresAt = Date.now() + 6_000;
+    room.girlPeekExpiresAt = 0;
     room.girlOfTheNightId = girl.id;
     emitState(roomCode);
   });
@@ -1573,6 +1597,11 @@ io.on("connection", (socket) => {
       connectedAlive.length === 0 ||
       connectedAlive.every((player) => room.votes.has(player.id))
     ) {
+      room.voteRevealUntil = Date.now() + 3_000;
+      room.phaseEndsAt = room.voteRevealUntil;
+      emitState(roomCode);
+      return;
+
       const totals = new Map<string, number>();
       for (const [voterId, votedId] of room.votes.entries()) {
         const voter = room.players.find((player) => player.id === voterId);

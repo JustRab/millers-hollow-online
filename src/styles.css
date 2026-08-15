@@ -383,6 +383,8 @@ button {
     600 25px "Playfair Display",
     serif;
   margin: 0 0 5px;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
 }
 
 .role-card p,
@@ -507,6 +509,11 @@ button {
   box-shadow: inset 0 0 0 1px rgba(143, 184, 117, 0.28);
 }
 
+.player-tile.has-votes {
+  border-color: #71955a;
+  background: #252f23;
+}
+
 .your-vote-marker {
   color: #b9d99e;
   font:
@@ -522,8 +529,10 @@ button {
 }
 
 .player-tile.watched {
-  border-color: #c7924c;
-  box-shadow: 0 0 0 1px rgba(199, 146, 76, 0.45);
+  border-color: #d05a55;
+  background: #382323;
+  box-shadow: 0 0 0 2px rgba(208, 90, 85, 0.5), 0 0 22px rgba(208, 90, 85, 0.28);
+  animation: wolf-warning 0.8s ease-in-out infinite alternate;
 }
 
 .player-tile.lover {
@@ -543,6 +552,34 @@ button {
   border: 1px solid rgba(255, 156, 170, 0.45);
   font-size: 12px;
   line-height: 1;
+}
+
+.player-tile.vote-reveal {
+  border-color: #a7d477;
+  background: #2d3b27;
+  box-shadow: 0 0 0 2px rgba(167, 212, 119, 0.38), 0 0 24px rgba(167, 212, 119, 0.2);
+  animation: vote-count-reveal 0.75s ease-in-out infinite alternate;
+}
+
+.vote-count {
+  color: #d7f0b8;
+  font-weight: 700;
+}
+
+.vote-reveal-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 15px 0 2px;
+  padding: 10px 12px;
+  border: 1px solid #87ad61;
+  background: rgba(112, 157, 73, 0.16);
+  color: #d5edb6;
+  font:
+    500 11px "DM Mono",
+    monospace;
+  letter-spacing: 0.5px;
+  animation: vote-count-reveal 0.75s ease-in-out infinite alternate;
 }
 
 .player-tile:disabled {
@@ -977,6 +1014,16 @@ button {
     margin: 20px 0 17px;
   }
 
+  .role-name {
+    font-size: 21px;
+  }
+
+  .role-tag {
+    max-width: 82px;
+    white-space: normal;
+    text-align: center;
+  }
+
   .objective {
     display: none;
   }
@@ -1258,10 +1305,43 @@ button {
   background: linear-gradient(180deg, #442f1d, #2d2018);
 }
 
+.summary-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(10, 8, 6, 0.78);
+}
+
 .summary-modal {
+  width: min(760px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
   background: #1f1812;
   border: 1px solid #8d6b46;
   color: #f0e4d4;
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.58);
+}
+
+.summary-header,
+.summary-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 26px;
+}
+
+.summary-header h2 {
+  margin: 0;
+  font: 600 24px "Playfair Display", serif;
+}
+
+.summary-footer {
+  justify-content: flex-end;
+  border-top: 1px solid rgba(211, 167, 101, 0.24);
 }
 
 .summary-header button {
@@ -1301,6 +1381,94 @@ button {
   color: #f2cf9a;
 }
 
+.summary-content {
+  display: grid;
+  gap: 26px;
+  padding: 24px 26px;
+}
+
+.summary-section {
+  display: grid;
+  gap: 12px;
+}
+
+.summary-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.summary-section-intro {
+  margin: -4px 0 2px;
+  color: #b9aa96;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.summary-timeline {
+  display: grid;
+  gap: 12px;
+}
+
+.summary-event {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #4e3a28;
+  background: #2a2017;
+}
+
+.summary-event-marker {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  color: #f2cf9a;
+  border: 1px solid #80613d;
+  background: #382a1c;
+}
+
+.summary-event-body {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.summary-event-label {
+  color: #d7b47b;
+  font:
+    500 10px "DM Mono",
+    monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.summary-event-body p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: #f0e4d4;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.summary-event-body .protected-event {
+  color: #b9d99e;
+}
+
+.summary-vote-list {
+  display: grid;
+  gap: 6px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(211, 167, 101, 0.16);
+  color: #c8b89f;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .vote-entry,
 .timeline-entry,
 .role-reveal {
@@ -1310,6 +1478,7 @@ button {
 
 .reveal-role {
   color: #efd9ba;
+  overflow-wrap: anywhere;
 }
 
 .hunter-urgent-panel {
