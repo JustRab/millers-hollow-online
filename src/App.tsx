@@ -1608,6 +1608,7 @@ function App() {
           <div className="roster">
             {state.players.map((player) => {
               const isPlayerReady = state.readyIds.includes(player.id);
+              const votedFor = state.myVote === player.id;
               const watched = Boolean(
                 state.wolfWatchedIds?.includes(player.id),
               );
@@ -1615,7 +1616,7 @@ function App() {
               return (
                 <button
                   key={player.id}
-                  className={`player-tile ${selected === player.id ? "selected" : ""} ${!player.alive ? "dead" : ""} ${player.id === me.id ? "self" : ""} ${watched ? "watched" : ""} ${isLover ? "lover" : ""}`}
+                  className={`player-tile ${selected === player.id ? "selected" : ""} ${votedFor ? "voted-for" : ""} ${!player.alive ? "dead" : ""} ${player.id === me.id ? "self" : ""} ${watched ? "watched" : ""} ${isLover ? "lover" : ""}`}
                   onClick={() => {
                     if (!player.alive || player.id === me.id) return;
 
@@ -1667,6 +1668,11 @@ function App() {
                       {state.voteCounts[player.id] === 1 ? "" : "s"}
                     </span>
                   )}
+                  {votedFor && (
+                    <span className="your-vote-marker" aria-label="Your vote">
+                      YOUR VOTE
+                    </span>
+                  )}
                   {isLover && <span className="lover-heart" aria-label="Lover">♥</span>}
                   {player.id === me.id ? (
                     <span className="you-label">YOU</span>
@@ -1715,7 +1721,9 @@ function App() {
                 </div>
               </div>
               <p className="action-copy">
-                {livingCount <= 5
+                {state.myVote
+                  ? `You voted for ${state.players.find((player) => player.id === state.myVote)?.name ?? "a player"}. Your vote is locked.`
+                  : livingCount <= 5
                   ? "Endgame rule: every remaining player must vote before night can begin."
                   : "Early game: voting is optional, and the day can end without a full vote."}
               </p>
