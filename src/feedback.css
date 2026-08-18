@@ -101,6 +101,7 @@
   background: #30281e;
   padding: 14px 16px;
   margin-bottom: 23px;
+  animation: winner-rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .winner-banner > div {
@@ -707,16 +708,10 @@
   max-height: 46vh;
   overflow-y: auto;
   padding-right: 6px;
-  scrollbar-width: thin;
 }
 
 .chat-panel .chat-messages::-webkit-scrollbar {
   width: 8px;
-}
-
-.chat-panel .chat-messages::-webkit-scrollbar-thumb {
-  background: #5a4a36;
-  border-radius: 8px;
 }
 
 .helper-panel {
@@ -1004,6 +999,51 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+.screen-shake {
+  animation: screen-shake 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+@keyframes screen-shake {
+  10%,
+  90% {
+    transform: translate3d(-1px, 0, 0);
+  }
+  20%,
+  80% {
+    transform: translate3d(3px, 0, 0);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translate3d(-6px, 0, 0);
+  }
+  40%,
+  60% {
+    transform: translate3d(6px, 0, 0);
+  }
+}
+
+@keyframes winner-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(135, 177, 111, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(135, 177, 111, 0);
   }
 }
 

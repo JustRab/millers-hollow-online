@@ -1123,6 +1123,26 @@ io.on("connection", (socket) => {
     },
   );
 
+  socket.on("player:rename", (name: string) => {
+    const roomCode = socket.data.room ?? DEFAULT_ROOM;
+    const room = getRoom(roomCode);
+    const player = room.players.find((candidate) => candidate.id === socket.id);
+    if (!player || (room.phase !== "lobby" && !room.winner)) return;
+
+    const cleanName = String(name ?? "").trim().slice(0, 18);
+    if (!cleanName || cleanName === player.name) return;
+
+    const oldName = player.name;
+    player.name = cleanName;
+    addRoomMessage(room, {
+      name: "System",
+      text: `${oldName} is now known as ${cleanName}.`,
+      time: now(),
+      system: true,
+    });
+    emitState(roomCode);
+  });
+
   socket.on("chat:send", (text: string) => {
     const roomCode = socket.data.room ?? DEFAULT_ROOM;
     const room = getRoom(roomCode);

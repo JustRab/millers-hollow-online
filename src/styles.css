@@ -6,10 +6,35 @@
   background: #171615;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  scrollbar-color: #8a6d45 #211f1c;
+  scrollbar-width: thin;
 }
 
 * {
   box-sizing: border-box;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #1a1712;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #a1794a, #6b4f31);
+  border-radius: 999px;
+  border: 2px solid #1a1712;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #c3925a, #83603c);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 body {
@@ -417,6 +442,60 @@ button {
   margin-bottom: 9px;
 }
 
+.rename-panel {
+  margin: 0 1px 22px;
+}
+
+.rename-panel .section-label {
+  display: block;
+  margin-bottom: 9px;
+}
+
+.rename-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #3e3a33;
+  background: #211f1c;
+  color: #dfd5c5;
+  padding: 9px 12px;
+  font-size: 12px;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+
+.rename-trigger:hover {
+  border-color: #b08755;
+  background: #2a251e;
+}
+
+.rename-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rename-form input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #b08755;
+  background: #211f1c;
+  color: #efe5d5;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.rename-form input:focus {
+  outline: none;
+  border-color: #d5a65d;
+}
+
+.rename-form .icon-btn {
+  border: 1px solid #3e3a33;
+  padding: 7px;
+}
+
 .secondary-btn {
   border: 1px solid #575047;
   background: transparent;
@@ -651,6 +730,7 @@ button {
   border-radius: 50%;
   bottom: -1px;
   right: -1px;
+  animation: status-pulse 2.4s ease-in-out infinite;
 }
 
 .player-info {

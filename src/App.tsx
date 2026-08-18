@@ -345,6 +345,9 @@ function App() {
   const [dismissedTutorialHint, setDismissedTutorialHint] = useState(false);
   const [cupidTargets, setCupidTargets] = useState<string[]>([]);
   const [showSummary, setShowSummary] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [screenShake, setScreenShake] = useState(false);
 
   const seenEvent = useRef(0);
   const lastRevealVoteTotal = useRef(0);
@@ -364,6 +367,8 @@ function App() {
         setDeathCause(
           nextState.lastEvent?.title.includes("voted out") ? "voted" : "night",
         );
+        setScreenShake(true);
+        window.setTimeout(() => setScreenShake(false), 550);
       }
 
       if (nextState.sessionToken && nextState.sessionToken !== sessionToken) {
@@ -536,12 +541,21 @@ function App() {
     socket.emit("host:end-match");
   };
 
+  const submitRename = () => {
+    const cleanName = renameDraft.trim().slice(0, 18);
+    if (!cleanName) return;
+    localStorage.setItem("millers-name", cleanName);
+    socket.emit("player:rename", cleanName);
+    setRenameOpen(false);
+  };
+
   const meOrNull = state?.me ?? null;
   const phase = state?.phase ?? "lobby";
   const isLobby = phase === "lobby";
   const isNight = phase === "night";
   const isDay = phase === "day";
   const isDead = meOrNull ? !meOrNull.alive : false;
+  const canRename = isLobby || Boolean(state?.winner);
   const humans =
     state?.players.filter((player) => !player.id.endsWith("-bot")) ?? [];
   const isReady = meOrNull
@@ -1072,7 +1086,7 @@ function App() {
 
   return (
     <main
-      className={`${phase === "night" ? "app night" : phase === "day" ? "app day" : "app lobby"} ${isDead ? "spectator-mode" : ""} ${deathCause ? `death-${deathCause}` : ""}`}
+      className={`${phase === "night" ? "app night" : phase === "day" ? "app day" : "app lobby"} ${isDead ? "spectator-mode" : ""} ${deathCause ? `death-${deathCause}` : ""} ${screenShake ? "screen-shake" : ""}`}
     >
       <header className="topbar">
         <div className="brand">
@@ -1228,6 +1242,47 @@ function App() {
               <span>Only you can see this</span>
             </div>
           </div>
+
+          {canRename && (
+            <div className="rename-panel">
+              <span className="section-label">DISPLAY NAME</span>
+              {renameOpen ? (
+                <div className="rename-form">
+                  <input
+                    autoFocus
+                    maxLength={18}
+                    value={renameDraft}
+                    onChange={(event) => setRenameDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") submitRename();
+                      if (event.key === "Escape") setRenameOpen(false);
+                    }}
+                  />
+                  <button className="icon-btn" onClick={submitRename} aria-label="Save name">
+                    <Check size={16} />
+                  </button>
+                  <button
+                    className="icon-btn"
+                    onClick={() => setRenameOpen(false)}
+                    aria-label="Cancel rename"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="rename-trigger"
+                  onClick={() => {
+                    setRenameDraft(me.name);
+                    setRenameOpen(true);
+                  }}
+                >
+                  <span>{me.name}</span>
+                  <Send size={13} />
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="objective">
             <span className="section-label">YOUR OBJECTIVE</span>
