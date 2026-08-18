@@ -360,6 +360,11 @@ function ParallaxScene({ phase }: { phase: Phase }) {
       <div className="parallax-layer layer-glow" />
       <div className="parallax-layer layer-stars" />
       <div className="parallax-layer layer-fog" />
+      <div className="mist-layer">
+        <span className="mist-band band-1" />
+        <span className="mist-band band-2" />
+        <span className="mist-band band-3" />
+      </div>
       <div className="particles-layer">
         {particles.map((particle) => (
           <span
@@ -1679,24 +1684,39 @@ function App() {
                       <Eye size={16} /> Final Roles Revealed
                     </h3>
                     <div className="roles-grid">
-                      {state.players.map((player) => (
-                        <div key={player.id} className="role-reveal">
-                          <div className="reveal-info">
-                            <strong>{player.name}</strong>
+                      {state.players.map((player) => {
+                        const isMe = meOrNull?.id === player.id;
+                        const revealedRole = isMe ? meOrNull?.role : player.role;
+                        const themeClass = revealedRole
+                          ? roleThemeClass(revealedRole)
+                          : "theme-hidden";
+                        return (
+                          <div
+                            key={player.id}
+                            className={`role-reveal ${player.alive ? "alive" : "dead"}`}
+                          >
+                            <div className={`reveal-glyph ${themeClass}`}>
+                              {revealedRole ? roleGlyph(revealedRole) : "?"}
+                            </div>
+                            <div className="reveal-info">
+                              <strong>
+                                {player.name}
+                                {isMe ? " (You)" : ""}
+                              </strong>
+                              <span className="reveal-role">
+                                {revealedRole
+                                  ? displayRoleName(revealedRole)
+                                  : "Role hidden"}
+                              </span>
+                            </div>
                             <span
-                              className={`reveal-role ${player.alive ? "alive" : "dead"}`}
+                              className={`reveal-status ${player.alive ? "alive" : "dead"}`}
                             >
-                              {meOrNull && meOrNull.id === player.id
-                                ? `You (${displayRoleName(meOrNull.role)})`
-                                : state.winner && player.role
-                                  ? displayRoleName(player.role)
-                                  : player.alive
-                                    ? "Survived"
-                                    : "Eliminated"}
+                              {player.alive ? "Survived" : "Eliminated"}
                             </span>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

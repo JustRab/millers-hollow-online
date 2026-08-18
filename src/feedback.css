@@ -168,6 +168,21 @@
   color: #a6a19a;
 }
 
+.spectator-mode:before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 42%,
+    rgba(120, 10, 12, 0.45) 100%
+  );
+  opacity: 0;
+  animation: blood-vignette-in 1.8s ease-out forwards;
+}
+
 .spectator-mode:after {
   content: "";
   position: fixed;
@@ -1014,26 +1029,26 @@
 }
 
 .screen-shake {
-  animation: screen-shake 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+  animation: screen-shake 0.4s ease-in-out;
 }
 
 @keyframes screen-shake {
   10%,
   90% {
-    transform: translate3d(-1px, 0, 0);
+    transform: translate3d(-0.5px, 0, 0);
   }
   20%,
   80% {
-    transform: translate3d(3px, 0, 0);
+    transform: translate3d(1px, 0, 0);
   }
   30%,
   50%,
   70% {
-    transform: translate3d(-6px, 0, 0);
+    transform: translate3d(-2px, 0, 0);
   }
   40%,
   60% {
-    transform: translate3d(6px, 0, 0);
+    transform: translate3d(2px, 0, 0);
   }
 }
 
@@ -1045,6 +1060,18 @@
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes blood-vignette-in {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.55;
   }
 }
 
