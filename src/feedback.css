@@ -371,6 +371,17 @@
   margin-bottom: 23px;
 }
 
+.lobby-banner.is-host {
+  border-color: #d5a65d;
+  background: linear-gradient(105deg, #3a2f1c, #292219);
+  box-shadow: 0 0 0 1px rgba(213, 166, 93, 0.2), 0 12px 30px rgba(0, 0, 0, 0.25);
+}
+
+.lobby-banner.is-host .winner-sigil {
+  color: #ffd89f;
+  border-color: #d5a65d;
+}
+
 .lobby-banner > div {
   display: flex;
   flex-direction: column;

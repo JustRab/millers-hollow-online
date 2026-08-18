@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { io, type Socket } from "socket.io-client";
 import {
   Moon,
@@ -23,6 +23,7 @@ import {
   X,
   BookOpen,
   Lightbulb,
+  Crown,
 } from "lucide-react";
 
 type Phase = "lobby" | "night" | "day";
@@ -310,6 +311,75 @@ function roleGlyph(role: string) {
     default:
       return "○";
   }
+}
+
+type Particle = {
+  id: number;
+  left: number;
+  size: number;
+  duration: number;
+  delay: number;
+  drift: number;
+};
+
+function generateParticles(count: number): Particle[] {
+  return Array.from({ length: count }, (_, id) => ({
+    id,
+    left: Math.random() * 100,
+    size: 2 + Math.random() * 3,
+    duration: 9 + Math.random() * 10,
+    delay: Math.random() * -18,
+    drift: (Math.random() - 0.5) * 60,
+  }));
+}
+
+function ParallaxScene({ phase }: { phase: Phase }) {
+  const sceneRef = useRef<HTMLDivElement | null>(null);
+  const particles = useMemo(() => generateParticles(26), []);
+
+  useEffect(() => {
+    let frame = 0;
+    const handlePointerMove = (event: PointerEvent) => {
+      cancelAnimationFrame(frame);
+      const nx = event.clientX / window.innerWidth - 0.5;
+      const ny = event.clientY / window.innerHeight - 0.5;
+      frame = requestAnimationFrame(() => {
+        sceneRef.current?.style.setProperty("--px", nx.toFixed(3));
+        sceneRef.current?.style.setProperty("--py", ny.toFixed(3));
+      });
+    };
+    window.addEventListener("pointermove", handlePointerMove);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  return (
+    <div className={`parallax-scene phase-${phase}`} ref={sceneRef} aria-hidden="true">
+      <div className="parallax-layer layer-glow" />
+      <div className="parallax-layer layer-stars" />
+      <div className="parallax-layer layer-fog" />
+      <div className="particles-layer">
+        {particles.map((particle) => (
+          <span
+            key={particle.id}
+            className="particle"
+            style={
+              {
+                left: `${particle.left}%`,
+                width: `${particle.size}px`,
+                height: `${particle.size}px`,
+                animationDuration: `${particle.duration}s`,
+                animationDelay: `${particle.delay}s`,
+                "--drift": `${particle.drift}px`,
+              } as CSSProperties
+            }
+          />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function App() {
@@ -1088,6 +1158,7 @@ function App() {
     <main
       className={`${phase === "night" ? "app night" : phase === "day" ? "app day" : "app lobby"} ${isDead ? "spectator-mode" : ""} ${deathCause ? `death-${deathCause}` : ""} ${screenShake ? "screen-shake" : ""}`}
     >
+      <ParallaxScene phase={phase} />
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark">
@@ -1102,6 +1173,11 @@ function App() {
           <button onClick={copyRoom} aria-label="Copy room code">
             {copied ? <Check size={14} /> : <Copy size={14} />}
           </button>
+          {isHost && (
+            <span className="host-chip">
+              <Crown size={13} /> HOST
+            </span>
+          )}
         </div>
 
         <div className="top-actions">
@@ -1357,11 +1433,11 @@ function App() {
               </button>
               {isHost && (
                 <button
-                  className="secondary-btn"
+                  className="primary-btn host-start-cta"
                   disabled={!allPlayersReady || humans.length < 2}
                   onClick={() => socket.emit("game:start")}
                 >
-                  <Sun size={16} />
+                  <Crown size={16} />
                   {allPlayersReady
                     ? "Start game"
                     : `Waiting for ${humans.length - readyCount} more`}
@@ -1454,13 +1530,15 @@ function App() {
           )}
 
           {isLobby && (
-            <div className="lobby-banner">
-              <span className="winner-sigil">L</span>
+            <div className={`lobby-banner ${isHost ? "is-host" : ""}`}>
+              <span className="winner-sigil">
+                {isHost ? <Crown size={18} /> : "L"}
+              </span>
               <div>
                 <span className="section-label">WAITING ROOM</span>
                 <strong>
                   {isHost
-                    ? "You are the host."
+                    ? "You are hosting this room."
                     : "Waiting for the host to start."}
                 </strong>
                 <p>
@@ -1483,11 +1561,11 @@ function App() {
               </button>
               {isHost && (
                 <button
-                  className="secondary-btn host-start-cta"
+                  className="primary-btn host-start-cta"
                   disabled={!allPlayersReady || humans.length < 2}
                   onClick={() => socket.emit("game:start")}
                 >
-                  <Sun size={16} />
+                  <Crown size={18} />
                   {allPlayersReady
                     ? "Start Match"
                     : `Need ${Math.max(0, humans.length - readyCount)} more ready`}
