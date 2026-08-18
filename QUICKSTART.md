@@ -4,8 +4,6 @@
 
 ### Windows PowerShell
 ```powershell
-cd "c:\Users\ilicea\Documents\TWMH - Game"
-
 # First time: build the project
 npm run build
 
@@ -24,8 +22,7 @@ npm start
 ### **Best for you:** Render.com (Free, No Credit Card)
 
 1. **Create GitHub repo:**
-   ```powershell
-   cd "c:\Users\ilicea\Documents\TWMH - Game"
+   ```bash
    git init
    git add .
    git commit -m "Deploy Millers Hollow"
